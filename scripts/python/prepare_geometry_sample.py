@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Group sample artifacts into one clip folder and build scene geometry files."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+from pathlib import Path
+
+import numpy as np
+
+from pipeline_utils import (
+    DEFAULT_OUTPUTS_DIR,
+    backproject_depth_to_pointcloud,
+    ensure_output_roots,
+    load_json,
+    load_pickle,
+    resolve_in_outputs,
+    save_pointcloud_preview,
+    write_json,
+)
+
+
+def resolve_manifest_path(manifest_arg: str) -> Path:
+    """Resolve a manifest JSON path directly or from the outputs root."""
+    return resolve_in_outputs(manifest_arg, label="Manifest")
+
+
+def summarize_depth(depth_meters: np.ndarray) -> dict:
+    """Summarize depth coverage and basic metric statistics."""
+    arr = np.asarray(depth_meters, dtype=np.float32)
+    valid = np.isfinite(arr) & (arr > 0)
+    stats = {
+        "shape": list(arr.shape),
+        "num_pixels": int(arr.size),
+        "num_valid_pixels": int(valid.sum()),
+        "valid_ratio": float(valid.mean()),
+    }
+
+    if valid.any():
+        values = arr[valid]
+        stats.update(
+            {
+                "depth_min_m": float(values.min()),
+                "depth_max_m": float(values.max()),
+                "depth_mean_m": float(values.mean()),
+                "depth_median_m": float(np.median(values)),
+            }
+        )
+    else:
+        stats.update(
+            {
+                "depth_min_m": None,
+                "depth_max_m": None,
+                "depth_mean_m": None,
+                "depth_median_m": None,
+            }
+        )
+    return stats
+
+
+def summarize_pointcloud(points: np.ndarray) -> dict:
+    """Summarize scene point count and axis-aligned bounds."""
+    if points.shape[0] == 0:
+        return {"num_points": 0, "bbox_min": None, "bbox_max": None}
+
+    mins = points.min(axis=0)
+    maxs = points.max(axis=0)
+    return {
+        "num_points": int(points.shape[0]),
+        "bbox_min": mins.tolist(),
+        "bbox_max": maxs.tolist(),
+    }
+
+
+def move_into_clip_dir(src: Path, dst_dir: Path) -> Path:
+    """Move one artifact into the clip folder, tolerating repeated runs."""
+    dst = dst_dir / src.name
+
+    if src.resolve() == dst.resolve():
+        return dst
+
+    if dst.exists():
+        try:
+            if src.exists():
+                src.unlink()
+        except Exception:
+            pass
+        return dst
+
+    shutil.move(str(src), str(dst))
+    return dst
+
+
+def main() -> None:
+    """Parse arguments and build a clip-centered geometry workspace."""
+    parser = argparse.ArgumentParser(
+        description="Organize one sample into its own output folder and prepare geometry artifacts."
+    )
+    parser.add_argument(
+        "manifest",
+        help=(
+            "Sample manifest filename or path, e.g. "
+            "2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.sample_manifest.json"
+        ),
+    )
+    args = parser.parse_args()
+
+    ensure_output_roots()
+
+    manifest_path = resolve_manifest_path(args.manifest)
+    manifest = load_json(manifest_path)
+
+    clip_name = manifest["clip_name"]
+    clip_dir = DEFAULT_OUTPUTS_DIR / clip_name
+    clip_dir.mkdir(parents=True, exist_ok=True)
+
+    mapping_json = Path(manifest["mapping_json"])
+    rgb_png = Path(manifest["outputs"]["rgb_png"])
+    depth_raw_npy = Path(manifest["outputs"]["depth_raw_npy"])
+    depth_meters_npy = Path(manifest["outputs"]["depth_meters_npy"])
+    depth_vis_png = Path(manifest["outputs"]["depth_vis_png"])
+    intrinsics_pkl = Path(manifest["outputs"]["intrinsics_pkl"])
+
+    copied_mapping = move_into_clip_dir(mapping_json, clip_dir)
+    copied_manifest = move_into_clip_dir(manifest_path, clip_dir)
+    copied_rgb = move_into_clip_dir(rgb_png, clip_dir)
+    copied_depth_raw = move_into_clip_dir(depth_raw_npy, clip_dir)
+    copied_depth_m = move_into_clip_dir(depth_meters_npy, clip_dir)
+    copied_depth_vis = move_into_clip_dir(depth_vis_png, clip_dir)
+    copied_intr = move_into_clip_dir(intrinsics_pkl, clip_dir)
+
+    depth_meters = np.load(copied_depth_m)
+    intrinsics = load_pickle(copied_intr)
+    depth_stats = summarize_depth(depth_meters)
+    pointcloud = backproject_depth_to_pointcloud(depth_meters, intrinsics)
+    pointcloud_stats = summarize_pointcloud(pointcloud)
+
+    pointcloud_npy = clip_dir / "pointcloud.npy"
+    pointcloud_preview_png = clip_dir / "pointcloud_preview.png"
+    geometry_stats_json = clip_dir / "geometry_stats.json"
+
+    np.save(pointcloud_npy, pointcloud)
+    save_pointcloud_preview(
+        pointcloud,
+        pointcloud_preview_png,
+        title="Point Cloud Preview (X-Z)",
+        empty_message="No valid 3D points",
+    )
+
+    geometry_stats = {
+        "clip_name": clip_name,
+        "camera": manifest["camera"],
+        "source_video": manifest["source_video"],
+        "source_start": manifest["source_start"],
+        "source_end": manifest["source_end"],
+        "source_duration": manifest["source_duration"],
+        "depth_stats": depth_stats,
+        "pointcloud_stats": pointcloud_stats,
+        "files": {
+            "mapping_json": str(copied_mapping),
+            "sample_manifest_json": str(copied_manifest),
+            "rgb_png": str(copied_rgb),
+            "depth_raw_npy": str(copied_depth_raw),
+            "depth_meters_npy": str(copied_depth_m),
+            "depth_vis_png": str(copied_depth_vis),
+            "intrinsics_pkl": str(copied_intr),
+            "pointcloud_npy": str(pointcloud_npy),
+            "pointcloud_preview_png": str(pointcloud_preview_png),
+        },
+    }
+    write_json(geometry_stats_json, geometry_stats)
+    print(json.dumps(geometry_stats, indent=2))
+
+
+if __name__ == "__main__":
+    main()

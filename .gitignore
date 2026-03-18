@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# macOS
+.DS_Store
+
+# Virtual environments
+.env
+.env.*
+.venv/
+venv/
+
+# Local caches and outputs
+cache/
+outputs/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Models and external dependencies
+yolov8n-seg.pt
+sam-3d-body/
+sam-3d-body/checkpoints/
+
+# Local secrets and config
+*.local
+*.secret
+secrets.*
+credentials.json
+auth.json
+token.txt
+hf_token

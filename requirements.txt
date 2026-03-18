@@ -1,0 +1,7 @@
+numpy
+matplotlib
+Pillow
+ultralytics
+huggingface_hub
+
+# ffmpeg must be installed separately and available on PATH.
