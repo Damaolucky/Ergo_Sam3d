@@ -16,10 +16,11 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-from pipeline_utils import ensure_output_roots, resolve_in_outputs, write_json
+from pipeline_utils import ensure_output_roots, resolve_in_outputs, save_pointcloud_preview, write_json
 
 
 PREVIEW_RNG = np.random.default_rng(0)
@@ -237,6 +238,62 @@ def nearest_neighbor_metrics(points: np.ndarray, target: np.ndarray) -> dict[str
     }
 
 
+def mesh_guided_alignment_subset(
+    pointcloud: np.ndarray,
+    aligned_mesh: np.ndarray,
+    *,
+    bbox_padding_xyz: tuple[float, float, float] = (0.12, 0.12, 0.12),
+    distance_threshold_m: float = 0.20,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Keep only the point-cloud region that is spatially consistent with the mesh.
+
+    The raw human mask can still include shelf and background surfaces. After the
+    initial height-prior alignment, the mesh gives a much better support region
+    for deciding which depth points are likely to belong to the human body.
+    """
+    bbox_padding = np.asarray(bbox_padding_xyz, dtype=np.float32)
+    bbox_min = aligned_mesh.min(axis=0) - bbox_padding
+    bbox_max = aligned_mesh.max(axis=0) + bbox_padding
+    bbox_keep = np.all((pointcloud >= bbox_min) & (pointcloud <= bbox_max), axis=1)
+    bbox_subset = pointcloud[bbox_keep]
+
+    stats: dict[str, Any] = {
+        "bbox_padding_xyz_m": bbox_padding.astype(float).tolist(),
+        "bbox_subset_count": int(bbox_subset.shape[0]),
+        "distance_threshold_m": distance_threshold_m,
+        "distance_pruned_count": None,
+        "method": "mesh_bbox_only",
+    }
+
+    min_required = max(1000, pointcloud.shape[0] // 20)
+    if bbox_subset.shape[0] < min_required:
+        stats["fallback"] = "bbox_subset_too_small"
+        return pointcloud, stats
+
+    try:
+        from scipy.spatial import cKDTree
+    except Exception:
+        stats["fallback"] = "scipy_not_available"
+        return bbox_subset.astype(np.float32), stats
+
+    distances = cKDTree(aligned_mesh).query(bbox_subset, k=1)[0]
+    distance_keep = distances <= distance_threshold_m
+    distance_subset = bbox_subset[distance_keep]
+    stats["distance_pruned_count"] = int(distance_subset.shape[0])
+
+    if distance_subset.shape[0] < min_required:
+        stats["fallback"] = "distance_subset_too_small"
+        return bbox_subset.astype(np.float32), stats
+
+    stats["method"] = "mesh_bbox_plus_distance_prune"
+    stats["distance_pruned_metrics"] = {
+        "mean_distance_m": float(distances[distance_keep].mean()),
+        "median_distance_m": float(np.median(distances[distance_keep])),
+        "p95_distance_m": float(np.percentile(distances[distance_keep], 95)),
+    }
+    return distance_subset.astype(np.float32), stats
+
+
 def maybe_refine_alignment(
     aligned_mesh: np.ndarray,
     pointcloud_subset: np.ndarray,
@@ -417,22 +474,39 @@ def main() -> None:
         target_human_height_m=args.target_human_height_m,
         bottom_anchor_percentile=args.bottom_anchor_percentile,
     )
-    aligned_vertices, refinement_stats = maybe_refine_alignment(aligned_vertices, pointcloud_subset)
+    initial_subset, initial_subset_stats = mesh_guided_alignment_subset(pointcloud, aligned_vertices)
+    aligned_vertices, refinement_stats = maybe_refine_alignment(aligned_vertices, initial_subset)
+    final_subset, final_subset_stats = mesh_guided_alignment_subset(pointcloud, aligned_vertices)
+    alignment_stats["initial_alignment_subset"] = initial_subset_stats
     alignment_stats["refinement"] = refinement_stats
+    alignment_stats["final_alignment_subset"] = final_subset_stats
+    alignment_stats["overlap_metrics"] = {
+        "mesh_to_alignment_subset": nearest_neighbor_metrics(aligned_vertices, final_subset),
+        "alignment_subset_to_mesh": nearest_neighbor_metrics(final_subset, aligned_vertices),
+    }
 
     aligned_mesh_path = clip_dir / "aligned_mesh.obj"
     aligned_vertices_path = clip_dir / "aligned_mesh_vertices.npy"
+    alignment_subset_path = clip_dir / "alignment_pointcloud_subset.npy"
+    alignment_subset_preview_path = clip_dir / "alignment_pointcloud_subset_preview.png"
     overlay_path = clip_dir / "mesh_pointcloud_overlay_preview.png"
     stats_path = clip_dir / "alignment_stats.json"
 
     save_obj(aligned_mesh_path, aligned_vertices, mesh_faces)
     np.save(aligned_vertices_path, aligned_vertices)
-    save_overlay_preview(aligned_vertices, pointcloud, pointcloud_subset, overlay_path)
+    np.save(alignment_subset_path, final_subset)
+    save_pointcloud_preview(
+        final_subset,
+        alignment_subset_preview_path,
+        title="Alignment Point Cloud Subset (X-Z)",
+        empty_message="No alignment subset points",
+    )
+    save_overlay_preview(aligned_vertices, pointcloud, final_subset, overlay_path)
 
     mesh_extent_before = (mesh_vertices.max(axis=0) - mesh_vertices.min(axis=0)).tolist()
     mesh_extent_after = (aligned_vertices.max(axis=0) - aligned_vertices.min(axis=0)).tolist()
     pointcloud_extent = (pointcloud.max(axis=0) - pointcloud.min(axis=0)).tolist()
-    pointcloud_subset_extent = (pointcloud_subset.max(axis=0) - pointcloud_subset.min(axis=0)).tolist()
+    pointcloud_subset_extent = (final_subset.max(axis=0) - final_subset.min(axis=0)).tolist()
 
     payload = {
         "status": "height_prior_alignment_complete",
@@ -449,17 +523,19 @@ def main() -> None:
         "outputs": {
             "aligned_mesh_obj": str(aligned_mesh_path),
             "aligned_mesh_vertices_npy": str(aligned_vertices_path),
+            "alignment_pointcloud_subset_npy": str(alignment_subset_path),
+            "alignment_pointcloud_subset_preview_png": str(alignment_subset_preview_path),
             "mesh_pointcloud_overlay_preview_png": str(overlay_path),
             "alignment_stats_json": str(stats_path),
         },
         "notes": [
             "This alignment preserves the camera vertical axis and solves only for yaw, translation, and optional height-based scale.",
             "By default the mesh keeps its native human-height prior; pass --target-human-height-m when the subject's height is known.",
-            "The point-cloud subset is only used to stabilize alignment against mask leakage and background contamination.",
+            "The saved alignment point-cloud subset is a mesh-guided cleanup of the raw human point cloud and is the main signal to inspect in the overlay preview.",
         ],
         "todo": [
             "Estimate cabinet geometry in the same depth frame and compare its top height against the aligned human height reference.",
-            "Replace the current subset heuristic with a more explicit body-only point-cloud cleaning stage.",
+            "Promote the current alignment subset heuristic into an explicit body-only point-cloud cleaning stage shared across the pipeline.",
             "Add quantitative overlap metrics once cabinet and floor landmarks are available.",
         ],
     }

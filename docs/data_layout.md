@@ -32,25 +32,31 @@ Before geometry preparation:
 ```text
 ~/hzhou/outputs/
   <clip>.mapping.json
-  <clip>.rgb.png
-  <clip>.depth_raw.npy
-  <clip>.depth_meters.npy
-  <clip>.depth_vis.png
-  <clip>.intrinsics.pkl
-  <clip>.sample_manifest.json
+  <clip>__first_<position>.rgb.png
+  <clip>__first_<position>.depth_raw.npy
+  <clip>__first_<position>.depth_meters.npy
+  <clip>__first_<position>.depth_vis.png
+  <clip>__first_<position>.intrinsics.pkl
+  <clip>__first_<position>.sample_manifest.json
+  <clip>__last_<position>.rgb.png
+  <clip>__last_<position>.depth_raw.npy
+  <clip>__last_<position>.depth_meters.npy
+  <clip>__last_<position>.depth_vis.png
+  <clip>__last_<position>.intrinsics.pkl
+  <clip>__last_<position>.sample_manifest.json
 ```
 
 After geometry preparation:
 
 ```text
-~/hzhou/outputs/<clip>/
+~/hzhou/outputs/<clip>__<role>_<position>/
   <clip>.mapping.json
-  <clip>.rgb.png
-  <clip>.depth_raw.npy
-  <clip>.depth_meters.npy
-  <clip>.depth_vis.png
-  <clip>.intrinsics.pkl
-  <clip>.sample_manifest.json
+  <clip>__<role>_<position>.rgb.png
+  <clip>__<role>_<position>.depth_raw.npy
+  <clip>__<role>_<position>.depth_meters.npy
+  <clip>__<role>_<position>.depth_vis.png
+  <clip>__<role>_<position>.intrinsics.pkl
+  <clip>__<role>_<position>.sample_manifest.json
   pointcloud.npy
   pointcloud_preview.png
   geometry_stats.json
@@ -70,6 +76,8 @@ After geometry preparation:
   mesh_recovery_stats.json
   aligned_mesh.obj
   aligned_mesh_vertices.npy
+  alignment_pointcloud_subset.npy
+  alignment_pointcloud_subset_preview.png
   mesh_pointcloud_overlay_preview.png
   alignment_stats.json
 ```

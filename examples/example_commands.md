@@ -14,29 +14,38 @@ CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 # Step 1: clip -> RGB/depth mapping
 bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
 
-# Step 2: extract one RGB frame and one depth frame
+# Step 2: extract first/last endpoint RGB+depth samples
 bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
 
-# Step 3: move sample files into outputs/<clip>/ and prepare scene geometry
-bash scripts/bash/run_prepare_geometry.sh "$CLIP.sample_manifest.json"
+FIRST_SAMPLE="${CLIP}__first_high_24"
+LAST_SAMPLE="${CLIP}__last_high_24"
+
+# Step 3: move each endpoint sample into outputs/<sample>/ and prepare scene geometry
+bash scripts/bash/run_prepare_geometry.sh "${FIRST_SAMPLE}.sample_manifest.json"
+bash scripts/bash/run_prepare_geometry.sh "${LAST_SAMPLE}.sample_manifest.json"
 
 # Step 4: generate a human mask and masked human point cloud
-bash scripts/bash/run_human_mask.sh "$CLIP"
+bash scripts/bash/run_human_mask.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_human_mask.sh "$LAST_SAMPLE"
 
 # Step 5: run PCA-based geometry analysis
-bash scripts/bash/run_analyze_human_geometry.sh "$CLIP"
+bash scripts/bash/run_analyze_human_geometry.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_analyze_human_geometry.sh "$LAST_SAMPLE"
 
 # Step 6: setup HMR2 / 4D-Humans once
 bash scripts/bash/setup_hmr2.sh
 
 # Step 7: recover a human mesh with HMR2
-bash scripts/bash/run_human_mesh_recovery.sh "$CLIP"
+bash scripts/bash/run_human_mesh_recovery.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_human_mesh_recovery.sh "$LAST_SAMPLE"
 
 # Step 8: run the height-prior mesh-to-pointcloud alignment
-bash scripts/bash/run_align_mesh.sh "$CLIP"
+bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE"
 
 # Optional: use a known subject height to set the final scale explicitly
-bash scripts/bash/run_align_mesh.sh "$CLIP" --target-human-height-m 1.72
+bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE" --target-human-height-m 1.72
+bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE" --target-human-height-m 1.72
 ```
 
 Expected verified checkpoints from this example:

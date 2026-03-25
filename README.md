@@ -3,7 +3,7 @@
 This repository preserves a verified Linux pipeline for:
 
 1. mapping a human motion clip to RGB/depth frames,
-2. extracting one RGB sample and one aligned depth sample,
+2. extracting endpoint RGB/depth samples for the first and last clip frames,
 3. building a scene point cloud,
 4. generating a human mask and human-only point cloud,
 5. running basic PCA-based human geometry analysis,
@@ -153,19 +153,29 @@ CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 
 bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
 bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
-bash scripts/bash/run_prepare_geometry.sh "$CLIP.sample_manifest.json"
-bash scripts/bash/run_human_mask.sh "$CLIP"
-bash scripts/bash/run_analyze_human_geometry.sh "$CLIP"
+
+FIRST_SAMPLE="${CLIP}__first_high_24"
+LAST_SAMPLE="${CLIP}__last_high_24"
+
+bash scripts/bash/run_prepare_geometry.sh "${FIRST_SAMPLE}.sample_manifest.json"
+bash scripts/bash/run_prepare_geometry.sh "${LAST_SAMPLE}.sample_manifest.json"
+bash scripts/bash/run_human_mask.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_human_mask.sh "$LAST_SAMPLE"
+bash scripts/bash/run_analyze_human_geometry.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_analyze_human_geometry.sh "$LAST_SAMPLE"
 
 # Optional next-stage setup
 bash scripts/bash/setup_hmr2.sh
 
 # New next-stage steps
-bash scripts/bash/run_human_mesh_recovery.sh "$CLIP"
-bash scripts/bash/run_align_mesh.sh "$CLIP"
+bash scripts/bash/run_human_mesh_recovery.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_human_mesh_recovery.sh "$LAST_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE"
 
 # Optional: if the subject's real height is known, use it directly for scale calibration
-bash scripts/bash/run_align_mesh.sh "$CLIP" --target-human-height-m 1.72
+bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE" --target-human-height-m 1.72
+bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE" --target-human-height-m 1.72
 ```
 
 Outputs are written under `${ERGO_WORK_ROOT:-~/hzhou}/outputs/`.
@@ -173,23 +183,23 @@ Outputs are written under `${ERGO_WORK_ROOT:-~/hzhou}/outputs/`.
 Important behavior:
 
 - Step 1 creates `<clip>.mapping.json`
-- Step 2 creates `<clip>.sample_manifest.json` and sample files in `outputs/`
-- Step 3 moves those sample files into `outputs/<clip>/`
-- Steps 4 and 5 operate on `outputs/<clip>/`
-- Step 6 writes mesh recovery artifacts into `outputs/<clip>/`
-- Step 7 writes height-prior alignment artifacts into `outputs/<clip>/`
+- Step 2 creates first/last endpoint sample files such as `<clip>__first_high_24.*` and `<clip>__last_high_24.*`
+- Step 3 moves each endpoint sample into its own folder under `outputs/<clip>__<role>_<position>/`
+- Steps 4 and 5 operate on each endpoint folder independently
+- Step 6 writes mesh recovery artifacts into each endpoint folder
+- Step 7 writes height-prior alignment artifacts into each endpoint folder
 
 ## Step Outputs
 
 `*.mapping.json`
 
 - clip-level mapping from metadata time to RGB frame range and nearest depth frame
-- includes inferred camera, timestamp normalization info, and approximate FPS
+- includes inferred camera, timestamp normalization info, approximate FPS, and endpoint sample specs for `first` and `last`
 
 `*.sample_manifest.json`
 
-- manifest for the extracted RGB/depth sample pair
-- points to the RGB image, depth arrays, intrinsics, and source mapping file
+- manifest for one endpoint RGB/depth sample pair
+- records the `sample_role` (`first` or `last`), the position label parsed from the clip metadata, and the output files for that endpoint
 
 `geometry_stats.json`
 
@@ -215,17 +225,24 @@ Important behavior:
 `alignment_stats.json`
 
 - yaw-only transform from recovered mesh space to human point-cloud space
-- optional height calibration, lower-body anchoring, and height-reference stats for later cabinet-height estimation
+- optional height calibration, lower-body anchoring, overlap metrics, and the mesh-guided alignment subset stats used for later cabinet-height estimation
 
 ## Verified Example Notes
 
 Verified mapping output for the example clip includes:
 
 - `color_frame_range: [16970, 17028]`
+- `first_color_frame.index: 16970`
+- `last_color_frame.index: 17028`
 - `mid_color_frame.index: 16999`
 - `nearest_depth_frame.index: 8511`
 - `approx_color_fps ~= 30`
 - `approx_depth_fps ~= 15`
+
+For this clip, the new endpoint sample folders are named:
+
+- `2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4__first_high_24`
+- `2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4__last_high_24`
 
 Verified geometry example:
 

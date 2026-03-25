@@ -5,7 +5,7 @@
 The pipeline converts one annotated lift clip into:
 
 - a verified RGB/depth frame mapping,
-- one RGB sample and one aligned depth sample,
+- endpoint RGB/depth samples for the first and last clip frames,
 - a scene point cloud,
 - a human mask and human-only point cloud,
 - a coarse PCA-based human geometry summary,
@@ -29,15 +29,25 @@ CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 
 bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
 bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
-bash scripts/bash/run_prepare_geometry.sh "$CLIP.sample_manifest.json"
-bash scripts/bash/run_human_mask.sh "$CLIP"
-bash scripts/bash/run_analyze_human_geometry.sh "$CLIP"
+
+FIRST_SAMPLE="${CLIP}__first_high_24"
+LAST_SAMPLE="${CLIP}__last_high_24"
+
+bash scripts/bash/run_prepare_geometry.sh "${FIRST_SAMPLE}.sample_manifest.json"
+bash scripts/bash/run_prepare_geometry.sh "${LAST_SAMPLE}.sample_manifest.json"
+bash scripts/bash/run_human_mask.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_human_mask.sh "$LAST_SAMPLE"
+bash scripts/bash/run_analyze_human_geometry.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_analyze_human_geometry.sh "$LAST_SAMPLE"
 
 # New next-stage setup and execution
 bash scripts/bash/setup_hmr2.sh
-bash scripts/bash/run_human_mesh_recovery.sh "$CLIP"
-bash scripts/bash/run_align_mesh.sh "$CLIP"
-bash scripts/bash/run_align_mesh.sh "$CLIP" --target-human-height-m 1.72
+bash scripts/bash/run_human_mesh_recovery.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_human_mesh_recovery.sh "$LAST_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE" --target-human-height-m 1.72
+bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE" --target-human-height-m 1.72
 ```
 
 ## Stage Details
@@ -61,6 +71,8 @@ Behavior:
 Verified example output:
 
 - `color_frame_range: [16970, 17028]`
+- `first_color_frame.index: 16970`
+- `last_color_frame.index: 17028`
 - `mid_color_frame.index: 16999`
 - `nearest_depth_frame.index: 8511`
 
@@ -73,11 +85,11 @@ Entry points:
 
 Behavior:
 
-- extracts the midpoint RGB frame from the clip video with `ffmpeg`
-- extracts the nearest depth frame from the tarball
+- extracts the first and last RGB frames from the clip video with `ffmpeg`
+- extracts the nearest depth frame for each endpoint from the tarball
 - extracts `depth.scale.npy`
 - extracts `depth.intrinsics.pkl`
-- saves RGB, raw depth, metric depth, depth visualization, and sample manifest
+- saves RGB, raw depth, metric depth, depth visualization, and one sample manifest per endpoint
 
 ### 3. Geometry sample preparation
 
@@ -194,5 +206,7 @@ Expected outputs:
 
 - `aligned_mesh.obj`
 - `aligned_mesh_vertices.npy`
+- `alignment_pointcloud_subset.npy`
+- `alignment_pointcloud_subset_preview.png`
 - `mesh_pointcloud_overlay_preview.png`
 - `alignment_stats.json`
