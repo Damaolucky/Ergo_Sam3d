@@ -58,6 +58,7 @@ else
 fi
 
 conda run -n "$ERGO_HMR2_ENV_NAME" python -m pip install --upgrade pip setuptools wheel
+conda run -n "$ERGO_HMR2_ENV_NAME" python -m pip install omegaconf hydra-core
 conda run -n "$ERGO_HMR2_ENV_NAME" python -m pip install --no-build-isolation git+https://github.com/mattloper/chumpy
 conda run -n "$ERGO_HMR2_ENV_NAME" python -m pip install --no-build-isolation -e "$ERGO_HMR2_REPO"
 
