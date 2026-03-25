@@ -48,6 +48,35 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, handle, indent=2)
 
 
+def sanitize_label(label: str) -> str:
+    """Convert a free-form label into a filesystem-safe ASCII token."""
+    cleaned = [
+        char if char.isalnum() or char in ("-", "_", ".") else "_"
+        for char in str(label).strip().lower()
+    ]
+    token = "".join(cleaned).strip("._")
+    return token or "unknown"
+
+
+def format_position_label(height: Any, strength: Any, *, fallback: str) -> str:
+    """Build a compact position label such as `high_24`."""
+    parts: list[str] = []
+    if height not in (None, "", "None"):
+        parts.append(sanitize_label(str(height)))
+    if strength not in (None, "", "None"):
+        parts.append(sanitize_label(str(strength)))
+    if not parts:
+        return sanitize_label(fallback)
+    return "_".join(parts)
+
+
+def build_sample_output_name(clip_name: str, sample_role: str, position_label: str) -> str:
+    """Build one stable sample-specific output prefix for a clip endpoint."""
+    role_token = sanitize_label(sample_role)
+    position_token = sanitize_label(position_label)
+    return f"{clip_name}__{role_token}_{position_token}"
+
+
 def load_pickle(path: Path) -> Any:
     """Load a Python pickle from disk."""
     with open(path, "rb") as handle:

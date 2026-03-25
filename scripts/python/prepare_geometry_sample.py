@@ -151,6 +151,11 @@ def main() -> None:
 
     geometry_stats = {
         "clip_name": clip_name,
+        "source_clip_name": manifest.get("source_clip_name", clip_name),
+        "sample_name": manifest.get("sample_name", clip_name),
+        "sample_role": manifest.get("sample_role"),
+        "position_label": manifest.get("position_label"),
+        "clip_time_seconds": manifest.get("clip_time_seconds"),
         "camera": manifest["camera"],
         "source_video": manifest["source_video"],
         "source_start": manifest["source_start"],

@@ -17,7 +17,9 @@ from pipeline_utils import (
     DEFAULT_DATA_ROOT,
     DEFAULT_JSON_ROOT,
     DEFAULT_OUTPUTS_DIR,
+    build_sample_output_name,
     ensure_output_roots,
+    format_position_label,
     load_json,
     write_json,
 )
@@ -188,6 +190,7 @@ def build_or_load_index(
 
 def build_result(
     session_name: str,
+    clip_name: str,
     meta: dict[str, Any],
     tar_path: Path,
     index: dict[str, Any],
@@ -217,17 +220,25 @@ def build_result(
     start_color_idx = nearest_index(color_ts_rel, start_t)
     end_color_idx = nearest_index(color_ts_rel, end_t)
     mid_color_idx = nearest_index(color_ts_rel, mid_t)
+    start_depth_idx = nearest_index(depth_ts_rel, float(color_ts_rel[start_color_idx]))
+    end_depth_idx = nearest_index(depth_ts_rel, float(color_ts_rel[end_color_idx]))
 
     target_depth_time = float(color_ts_rel[mid_color_idx])
     mid_depth_idx = nearest_index(depth_ts_rel, target_depth_time)
 
-    depth_member_name = None
     depth_members = cam_info["depth_members"]
-    if depth_members:
-        if len(depth_members) == len(depth_ts_rel):
-            depth_member_name = depth_members[mid_depth_idx]
-        elif mid_depth_idx < len(depth_members):
-            depth_member_name = depth_members[mid_depth_idx]
+    def depth_member_for_index(depth_index: int) -> str | None:
+        member_name = None
+        if depth_members:
+            if len(depth_members) == len(depth_ts_rel):
+                member_name = depth_members[depth_index]
+            elif depth_index < len(depth_members):
+                member_name = depth_members[depth_index]
+        return member_name
+
+    depth_member_name = depth_member_for_index(mid_depth_idx)
+    start_depth_member_name = depth_member_for_index(start_depth_idx)
+    end_depth_member_name = depth_member_for_index(end_depth_idx)
 
     approx_color_fps = None
     approx_depth_fps = None
@@ -241,6 +252,50 @@ def build_result(
         depth_dt = depth_dt[depth_dt > 0]
         if depth_dt.size > 0:
             approx_depth_fps = float(1.0 / np.median(depth_dt))
+
+    first_position_label = format_position_label(
+        meta.get("height1"),
+        meta.get("height1_strength"),
+        fallback="first",
+    )
+    last_position_label = format_position_label(
+        meta.get("height2"),
+        meta.get("height2_strength"),
+        fallback="last",
+    )
+
+    sample_frames = {
+        "first": {
+            "sample_role": "first",
+            "position_label": first_position_label,
+            "sample_name": build_sample_output_name(clip_name, "first", first_position_label),
+            "clip_time_seconds": 0.0,
+            "color_frame": {
+                "index": start_color_idx,
+                "timestamp_relative_seconds": float(color_ts_rel[start_color_idx]),
+            },
+            "nearest_depth_frame": {
+                "index": start_depth_idx,
+                "timestamp_relative_seconds": float(depth_ts_rel[start_depth_idx]),
+                "tar_member": start_depth_member_name,
+            },
+        },
+        "last": {
+            "sample_role": "last",
+            "position_label": last_position_label,
+            "sample_name": build_sample_output_name(clip_name, "last", last_position_label),
+            "clip_time_seconds": float(meta["source_duration"]),
+            "color_frame": {
+                "index": end_color_idx,
+                "timestamp_relative_seconds": float(color_ts_rel[end_color_idx]),
+            },
+            "nearest_depth_frame": {
+                "index": end_depth_idx,
+                "timestamp_relative_seconds": float(depth_ts_rel[end_depth_idx]),
+                "tar_member": end_depth_member_name,
+            },
+        },
+    }
 
     return {
         "camera": camera,
@@ -261,15 +316,20 @@ def build_result(
         "approx_color_fps": approx_color_fps,
         "approx_depth_fps": approx_depth_fps,
         "color_frame_range": [start_color_idx, end_color_idx],
+        "first_color_frame": sample_frames["first"]["color_frame"],
+        "last_color_frame": sample_frames["last"]["color_frame"],
         "mid_color_frame": {
             "index": mid_color_idx,
             "timestamp_relative_seconds": float(color_ts_rel[mid_color_idx]),
         },
+        "first_nearest_depth_frame": sample_frames["first"]["nearest_depth_frame"],
+        "last_nearest_depth_frame": sample_frames["last"]["nearest_depth_frame"],
         "nearest_depth_frame": {
             "index": mid_depth_idx,
             "timestamp_relative_seconds": float(depth_ts_rel[mid_depth_idx]),
             "tar_member": depth_member_name,
         },
+        "sample_frames": sample_frames,
         "metadata_fields": {
             "height1": meta.get("height1"),
             "height1_strength": meta.get("height1_strength"),
@@ -331,7 +391,7 @@ def main() -> None:
         force_reindex=args.force_reindex,
     )
 
-    result = build_result(session_name, clip_meta[args.clip_name], tar_path, index)
+    result = build_result(session_name, args.clip_name, clip_meta[args.clip_name], tar_path, index)
     result["clip_name"] = args.clip_name
     result["json_path"] = str(json_path)
 

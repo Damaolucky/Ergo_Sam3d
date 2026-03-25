@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract one RGB sample and one aligned depth sample from a mapping JSON."""
+"""Extract endpoint RGB/depth samples from a mapping JSON."""
 
 from __future__ import annotations
 
@@ -17,7 +17,9 @@ import numpy as np
 from pipeline_utils import (
     DEFAULT_CLIPS_DIR,
     DEFAULT_OUTPUTS_DIR,
+    build_sample_output_name,
     ensure_output_roots,
+    format_position_label,
     load_json,
     resolve_in_outputs,
     save_depth_vis,
@@ -54,7 +56,7 @@ def find_member_by_suffix(tf: tarfile.TarFile, suffix: str) -> str:
 
 
 def ensure_ffmpeg() -> str:
-    """Find an ffmpeg binary that can extract a representative RGB frame."""
+    """Find an ffmpeg binary that can extract representative RGB frames."""
     for name in ("ffmpeg", "/usr/bin/ffmpeg"):
         try:
             subprocess.run(
@@ -69,15 +71,24 @@ def ensure_ffmpeg() -> str:
     raise RuntimeError("ffmpeg not found in PATH.")
 
 
-def extract_rgb_from_clip(clip_path: Path, duration_sec: float, out_png: Path) -> None:
-    """Extract the clip midpoint frame as an RGB PNG."""
+def extract_rgb_from_clip_time(
+    clip_path: Path,
+    clip_time_sec: float,
+    duration_sec: float,
+    out_png: Path,
+    *,
+    fps_hint: float | None,
+) -> None:
+    """Extract one RGB frame from the clip video at a chosen clip-relative time."""
     ffmpeg_bin = ensure_ffmpeg()
-    mid_sec = max(duration_sec / 2.0, 0.0)
+    frame_guard = 1.0 / max(float(fps_hint or 30.0), 1.0)
+    max_seek = max(duration_sec - frame_guard, 0.0)
+    sample_time = min(max(clip_time_sec, 0.0), max_seek)
     cmd = [
         ffmpeg_bin,
         "-y",
         "-ss",
-        f"{mid_sec:.6f}",
+        f"{sample_time:.6f}",
         "-i",
         str(clip_path),
         "-frames:v",
@@ -92,10 +103,117 @@ def resolve_mapping_path(mapping_arg: str) -> Path:
     return resolve_in_outputs(mapping_arg, label="Mapping JSON")
 
 
+def legacy_sample_frames(mapping: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Build a single midpoint sample entry for older mapping files."""
+    clip_name = mapping["clip_name"]
+    meta = mapping.get("metadata_fields", {})
+    mid_label = format_position_label(
+        meta.get("height1"),
+        meta.get("height1_strength"),
+        fallback="mid",
+    )
+    return {
+        "mid": {
+            "sample_role": "mid",
+            "position_label": mid_label,
+            "sample_name": build_sample_output_name(clip_name, "mid", mid_label),
+            "clip_time_seconds": float(mapping["source_duration"]) / 2.0,
+            "color_frame": mapping["mid_color_frame"],
+            "nearest_depth_frame": mapping["nearest_depth_frame"],
+        }
+    }
+
+
+def choose_sample_frames(mapping: dict[str, Any], sample_roles: list[str]) -> list[dict[str, Any]]:
+    """Select the requested sample frame specs from the mapping payload."""
+    sample_frames = mapping.get("sample_frames") or legacy_sample_frames(mapping)
+    selected: list[dict[str, Any]] = []
+    for role in sample_roles:
+        if role not in sample_frames:
+            raise KeyError(f"Requested sample role '{role}' not present in mapping JSON.")
+        selected.append(sample_frames[role])
+    return selected
+
+
+def save_one_sample(
+    *,
+    clip_name: str,
+    mapping_path: Path,
+    mapping: dict[str, Any],
+    clip_path: Path,
+    tf: tarfile.TarFile,
+    camera: str,
+    depth_scale: float,
+    intrinsics: Any,
+    sample_spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Extract and persist one sample bundle for a chosen clip endpoint."""
+    sample_name = sample_spec["sample_name"]
+
+    rgb_png = DEFAULT_OUTPUTS_DIR / f"{sample_name}.rgb.png"
+    depth_raw_npy = DEFAULT_OUTPUTS_DIR / f"{sample_name}.depth_raw.npy"
+    depth_meters_npy = DEFAULT_OUTPUTS_DIR / f"{sample_name}.depth_meters.npy"
+    depth_vis_png = DEFAULT_OUTPUTS_DIR / f"{sample_name}.depth_vis.png"
+    intrinsics_pkl = DEFAULT_OUTPUTS_DIR / f"{sample_name}.intrinsics.pkl"
+    manifest_json = DEFAULT_OUTPUTS_DIR / f"{sample_name}.sample_manifest.json"
+
+    extract_rgb_from_clip_time(
+        clip_path,
+        float(sample_spec["clip_time_seconds"]),
+        float(mapping["source_duration"]),
+        rgb_png,
+        fps_hint=mapping.get("approx_color_fps"),
+    )
+
+    depth_member = sample_spec["nearest_depth_frame"]["tar_member"]
+    if not depth_member:
+        raise RuntimeError(
+            f"Mapping JSON has no tar member for sample role '{sample_spec['sample_role']}'."
+        )
+
+    depth_raw = np.asarray(load_npy_from_tar(tf, depth_member))
+    depth_meters = depth_raw.astype(np.float32) * depth_scale
+
+    np.save(depth_raw_npy, depth_raw)
+    np.save(depth_meters_npy, depth_meters)
+    save_pickle(intrinsics_pkl, intrinsics)
+    save_depth_vis(depth_meters, depth_vis_png)
+
+    manifest = {
+        "mapping_json": str(mapping_path),
+        "clip_name": sample_name,
+        "source_clip_name": clip_name,
+        "sample_name": sample_name,
+        "sample_role": sample_spec["sample_role"],
+        "position_label": sample_spec["position_label"],
+        "clip_video": str(clip_path),
+        "camera": camera,
+        "tar_path": str(mapping["tar_path"]),
+        "source_video": mapping["source_video"],
+        "source_start": mapping["source_start"],
+        "source_end": mapping["source_end"],
+        "source_duration": mapping["source_duration"],
+        "clip_time_seconds": sample_spec["clip_time_seconds"],
+        "color_frame": sample_spec["color_frame"],
+        "nearest_depth_frame": sample_spec["nearest_depth_frame"],
+        "depth_scale": depth_scale,
+        "outputs": {
+            "rgb_png": str(rgb_png),
+            "depth_raw_npy": str(depth_raw_npy),
+            "depth_meters_npy": str(depth_meters_npy),
+            "depth_vis_png": str(depth_vis_png),
+            "intrinsics_pkl": str(intrinsics_pkl),
+            "sample_manifest_json": str(manifest_json),
+        },
+    }
+    write_json(manifest_json, manifest)
+    return manifest
+
+
 def main() -> None:
-    """Parse arguments and extract sample assets for one mapped clip."""
+    """Parse arguments and extract endpoint sample assets for one mapped clip."""
     parser = argparse.ArgumentParser(
-        description="Extract one RGB sample frame and one depth sample from a mapping JSON."
+        description="Extract first/last RGB+depth samples from a mapping JSON."
     )
     parser.add_argument(
         "mapping",
@@ -103,6 +221,13 @@ def main() -> None:
             "Mapping JSON filename or path, e.g. "
             "2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.mapping.json"
         ),
+    )
+    parser.add_argument(
+        "--sample-roles",
+        nargs="+",
+        default=["first", "last"],
+        choices=["first", "last", "mid"],
+        help="Which sample roles to extract. Default: first last",
     )
     args = parser.parse_args()
 
@@ -121,56 +246,37 @@ def main() -> None:
     if not tar_path.exists():
         raise FileNotFoundError(f"Tar file not found: {tar_path}")
 
-    stem = clip_name
-    rgb_png = DEFAULT_OUTPUTS_DIR / f"{stem}.rgb.png"
-    depth_raw_npy = DEFAULT_OUTPUTS_DIR / f"{stem}.depth_raw.npy"
-    depth_meters_npy = DEFAULT_OUTPUTS_DIR / f"{stem}.depth_meters.npy"
-    depth_vis_png = DEFAULT_OUTPUTS_DIR / f"{stem}.depth_vis.png"
-    intrinsics_pkl = DEFAULT_OUTPUTS_DIR / f"{stem}.intrinsics.pkl"
-    manifest_json = DEFAULT_OUTPUTS_DIR / f"{stem}.sample_manifest.json"
+    sample_specs = choose_sample_frames(mapping, args.sample_roles)
 
-    extract_rgb_from_clip(clip_path, float(mapping["source_duration"]), rgb_png)
-
+    manifests: list[dict[str, Any]] = []
     with tarfile.open(tar_path, "r:gz") as tf:
-        depth_member = mapping["nearest_depth_frame"]["tar_member"]
-        if not depth_member:
-            raise RuntimeError("Mapping JSON has no nearest_depth_frame.tar_member")
-
-        depth_raw = np.asarray(load_npy_from_tar(tf, depth_member))
         scale_member = find_member_by_suffix(tf, f"/{camera}/depth.scale.npy")
         intr_member = find_member_by_suffix(tf, f"/{camera}/depth.intrinsics.pkl")
         depth_scale = float(np.asarray(load_npy_from_tar(tf, scale_member)).reshape(-1)[0])
         intrinsics = load_pickle_from_tar(tf, intr_member)
 
-    depth_meters = depth_raw.astype(np.float32) * depth_scale
-    np.save(depth_raw_npy, depth_raw)
-    np.save(depth_meters_npy, depth_meters)
-    save_pickle(intrinsics_pkl, intrinsics)
-    save_depth_vis(depth_meters, depth_vis_png)
+        for sample_spec in sample_specs:
+            manifests.append(
+                save_one_sample(
+                    clip_name=clip_name,
+                    mapping_path=mapping_path,
+                    mapping=mapping,
+                    clip_path=clip_path,
+                    tf=tf,
+                    camera=camera,
+                    depth_scale=depth_scale,
+                    intrinsics=intrinsics,
+                    sample_spec=sample_spec,
+                )
+            )
 
-    manifest = {
+    payload = {
         "mapping_json": str(mapping_path),
-        "clip_name": clip_name,
-        "clip_video": str(clip_path),
-        "camera": camera,
-        "tar_path": str(tar_path),
-        "source_video": mapping["source_video"],
-        "source_start": mapping["source_start"],
-        "source_end": mapping["source_end"],
-        "source_duration": mapping["source_duration"],
-        "mid_color_frame": mapping["mid_color_frame"],
-        "nearest_depth_frame": mapping["nearest_depth_frame"],
-        "depth_scale": depth_scale,
-        "outputs": {
-            "rgb_png": str(rgb_png),
-            "depth_raw_npy": str(depth_raw_npy),
-            "depth_meters_npy": str(depth_meters_npy),
-            "depth_vis_png": str(depth_vis_png),
-            "intrinsics_pkl": str(intrinsics_pkl),
-        },
+        "source_clip_name": clip_name,
+        "sample_roles": args.sample_roles,
+        "generated_samples": manifests,
     }
-    write_json(manifest_json, manifest)
-    print(json.dumps(manifest, indent=2))
+    print(json.dumps(payload, indent=2))
 
 
 if __name__ == "__main__":

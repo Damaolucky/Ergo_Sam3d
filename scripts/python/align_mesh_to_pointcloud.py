@@ -222,6 +222,111 @@ def sample_points(points: np.ndarray, max_points: int) -> np.ndarray:
     return points[indices]
 
 
+def nearest_neighbor_metrics(points: np.ndarray, target: np.ndarray) -> dict[str, float] | None:
+    """Compute simple nearest-neighbor overlap metrics when SciPy is available."""
+    try:
+        from scipy.spatial import cKDTree
+    except Exception:
+        return None
+
+    distances = cKDTree(target).query(points, k=1)[0]
+    return {
+        "mean_distance_m": float(distances.mean()),
+        "median_distance_m": float(np.median(distances)),
+        "p95_distance_m": float(np.percentile(distances, 95)),
+    }
+
+
+def maybe_refine_alignment(
+    aligned_mesh: np.ndarray,
+    pointcloud_subset: np.ndarray,
+    *,
+    max_iterations: int = 3,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Apply a conservative nearest-neighbor refinement and keep it only if it improves."""
+    try:
+        from scipy.spatial import cKDTree
+    except Exception:
+        return aligned_mesh, {"status": "skipped", "reason": "scipy_not_available"}
+
+    rng = np.random.default_rng(0)
+    tree = cKDTree(pointcloud_subset)
+    best_mesh = aligned_mesh.copy()
+    initial_metrics = nearest_neighbor_metrics(best_mesh, pointcloud_subset)
+    best_metrics = initial_metrics
+    if best_metrics is None:
+        return aligned_mesh, {"status": "skipped", "reason": "metrics_unavailable"}
+
+    best_score = best_metrics["mean_distance_m"] + 0.25 * best_metrics["p95_distance_m"]
+    accepted_steps: list[dict[str, Any]] = []
+
+    for iteration in range(max_iterations):
+        sample_indices = rng.choice(best_mesh.shape[0], size=min(4000, best_mesh.shape[0]), replace=False)
+        sample = best_mesh[sample_indices]
+        distances, matched_idx = tree.query(sample, k=1)
+        keep = distances <= min(0.25, float(np.percentile(distances, 75)))
+        if int(keep.sum()) < 100:
+            break
+
+        mesh_matches = sample[keep]
+        point_matches = pointcloud_subset[matched_idx[keep]]
+
+        mesh_xz = mesh_matches[:, [0, 2]] - mesh_matches[:, [0, 2]].mean(axis=0, keepdims=True)
+        point_xz = point_matches[:, [0, 2]] - point_matches[:, [0, 2]].mean(axis=0, keepdims=True)
+        covariance = mesh_xz.T @ point_xz
+        u_mat, _, vt_mat = np.linalg.svd(covariance)
+        rotation_2d = vt_mat.T @ u_mat.T
+        if np.linalg.det(rotation_2d) < 0:
+            vt_mat[-1, :] *= -1.0
+            rotation_2d = vt_mat.T @ u_mat.T
+
+        yaw_delta = float(np.arctan2(rotation_2d[1, 0], rotation_2d[0, 0]))
+        yaw_delta = float(np.clip(yaw_delta, np.deg2rad(-5.0), np.deg2rad(5.0)))
+        rotation = yaw_rotation_matrix(yaw_delta)
+        candidate = best_mesh @ rotation.T
+
+        candidate_sample = candidate[sample_indices]
+        distances, matched_idx = tree.query(candidate_sample, k=1)
+        keep = distances <= min(0.20, float(np.percentile(distances, 70)))
+        if int(keep.sum()) < 100:
+            break
+
+        delta = pointcloud_subset[matched_idx[keep]] - candidate_sample[keep]
+        translation = np.median(delta, axis=0)
+        translation = np.clip(translation, [-0.05, -0.03, -0.05], [0.05, 0.03, 0.05])
+        candidate = candidate + translation[None, :]
+
+        candidate_metrics = nearest_neighbor_metrics(candidate, pointcloud_subset)
+        if candidate_metrics is None:
+            break
+        candidate_score = (
+            candidate_metrics["mean_distance_m"] + 0.25 * candidate_metrics["p95_distance_m"]
+        )
+
+        if candidate_score + 1e-6 < best_score:
+            best_mesh = candidate.astype(np.float32)
+            best_metrics = candidate_metrics
+            best_score = candidate_score
+            accepted_steps.append(
+                {
+                    "iteration": iteration,
+                    "accepted_yaw_degrees": float(np.degrees(yaw_delta)),
+                    "accepted_translation": translation.astype(float).tolist(),
+                    "metrics": candidate_metrics,
+                }
+            )
+        else:
+            break
+
+    return best_mesh, {
+        "status": "completed",
+        "accepted_iterations": len(accepted_steps),
+        "initial_metrics": initial_metrics,
+        "accepted_steps": accepted_steps,
+        "final_metrics": nearest_neighbor_metrics(best_mesh, pointcloud_subset),
+    }
+
+
 def save_overlay_preview(
     aligned_mesh: np.ndarray,
     pointcloud: np.ndarray,
@@ -312,6 +417,8 @@ def main() -> None:
         target_human_height_m=args.target_human_height_m,
         bottom_anchor_percentile=args.bottom_anchor_percentile,
     )
+    aligned_vertices, refinement_stats = maybe_refine_alignment(aligned_vertices, pointcloud_subset)
+    alignment_stats["refinement"] = refinement_stats
 
     aligned_mesh_path = clip_dir / "aligned_mesh.obj"
     aligned_vertices_path = clip_dir / "aligned_mesh_vertices.npy"

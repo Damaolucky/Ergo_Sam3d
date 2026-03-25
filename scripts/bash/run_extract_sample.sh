@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Extract one RGB/depth sample pair from a mapping JSON.
+# Extract endpoint RGB/depth sample pairs from a mapping JSON.
 
 set -euo pipefail
 
@@ -11,10 +11,11 @@ source "$SCRIPT_DIR/common.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/bash/run_extract_sample.sh <mapping_json_filename_or_path>
+  bash scripts/bash/run_extract_sample.sh <mapping_json_filename_or_path> [extra_python_args...]
 
 Example:
   bash scripts/bash/run_extract_sample.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.mapping.json
+  bash scripts/bash/run_extract_sample.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.mapping.json --sample-roles first last
 
 Environment:
   ERGO_WORK_ROOT  Default: ~/hzhou. Controls local outputs/.
@@ -27,9 +28,10 @@ if [ -z "$MAPPING_NAME" ]; then
   usage
   exit 1
 fi
+shift
 
 PY_SCRIPT="$(repo_python_script "extract_sample_from_mapping.py")"
 require_file "$PY_SCRIPT" "Python script"
 PYTHON_BIN="$(choose_python_bin)"
 
-"$PYTHON_BIN" "$PY_SCRIPT" "$MAPPING_NAME"
+"$PYTHON_BIN" "$PY_SCRIPT" "$MAPPING_NAME" "$@"
