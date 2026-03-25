@@ -238,6 +238,22 @@ def nearest_neighbor_metrics(points: np.ndarray, target: np.ndarray) -> dict[str
     }
 
 
+def apply_similarity_delta(
+    vertices: np.ndarray,
+    *,
+    yaw_radians: float,
+    translation_xyz: np.ndarray,
+    log_scale: float = 0.0,
+) -> np.ndarray:
+    """Apply a small yaw/translation/scale update around the mesh centroid."""
+    center = vertices.mean(axis=0, keepdims=True)
+    scale = float(np.exp(log_scale))
+    rotation = yaw_rotation_matrix(yaw_radians)
+    centered = (vertices - center) * scale
+    transformed = centered @ rotation.T
+    return (transformed + center + translation_xyz[None, :]).astype(np.float32)
+
+
 def mesh_guided_alignment_subset(
     pointcloud: np.ndarray,
     aligned_mesh: np.ndarray,
@@ -297,90 +313,92 @@ def mesh_guided_alignment_subset(
 def maybe_refine_alignment(
     aligned_mesh: np.ndarray,
     pointcloud_subset: np.ndarray,
-    *,
-    max_iterations: int = 3,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Apply a conservative nearest-neighbor refinement and keep it only if it improves."""
+    """Refine alignment with a bounded partial-Chamfer objective.
+
+    This mirrors the scan-fitting intuition used in SMPL-Fitting: keep only the
+    scan region that should match the body, then optimize a thresholded
+    bidirectional Chamfer-style objective rather than a pure PCA heuristic.
+    """
     try:
         from scipy.spatial import cKDTree
+        from scipy.optimize import minimize
     except Exception:
         return aligned_mesh, {"status": "skipped", "reason": "scipy_not_available"}
 
-    rng = np.random.default_rng(0)
-    tree = cKDTree(pointcloud_subset)
-    best_mesh = aligned_mesh.copy()
-    initial_metrics = nearest_neighbor_metrics(best_mesh, pointcloud_subset)
-    best_metrics = initial_metrics
-    if best_metrics is None:
+    subset_sample = sample_points(pointcloud_subset, 20000)
+    subset_tree = cKDTree(subset_sample)
+    initial_metrics = {
+        "mesh_to_subset": nearest_neighbor_metrics(aligned_mesh, subset_sample),
+        "subset_to_mesh": nearest_neighbor_metrics(subset_sample, aligned_mesh),
+    }
+    if initial_metrics["mesh_to_subset"] is None or initial_metrics["subset_to_mesh"] is None:
         return aligned_mesh, {"status": "skipped", "reason": "metrics_unavailable"}
 
-    best_score = best_metrics["mean_distance_m"] + 0.25 * best_metrics["p95_distance_m"]
-    accepted_steps: list[dict[str, Any]] = []
-
-    for iteration in range(max_iterations):
-        sample_indices = rng.choice(best_mesh.shape[0], size=min(4000, best_mesh.shape[0]), replace=False)
-        sample = best_mesh[sample_indices]
-        distances, matched_idx = tree.query(sample, k=1)
-        keep = distances <= min(0.25, float(np.percentile(distances, 75)))
-        if int(keep.sum()) < 100:
-            break
-
-        mesh_matches = sample[keep]
-        point_matches = pointcloud_subset[matched_idx[keep]]
-
-        mesh_xz = mesh_matches[:, [0, 2]] - mesh_matches[:, [0, 2]].mean(axis=0, keepdims=True)
-        point_xz = point_matches[:, [0, 2]] - point_matches[:, [0, 2]].mean(axis=0, keepdims=True)
-        covariance = mesh_xz.T @ point_xz
-        u_mat, _, vt_mat = np.linalg.svd(covariance)
-        rotation_2d = vt_mat.T @ u_mat.T
-        if np.linalg.det(rotation_2d) < 0:
-            vt_mat[-1, :] *= -1.0
-            rotation_2d = vt_mat.T @ u_mat.T
-
-        yaw_delta = float(np.arctan2(rotation_2d[1, 0], rotation_2d[0, 0]))
-        yaw_delta = float(np.clip(yaw_delta, np.deg2rad(-5.0), np.deg2rad(5.0)))
-        rotation = yaw_rotation_matrix(yaw_delta)
-        candidate = best_mesh @ rotation.T
-
-        candidate_sample = candidate[sample_indices]
-        distances, matched_idx = tree.query(candidate_sample, k=1)
-        keep = distances <= min(0.20, float(np.percentile(distances, 70)))
-        if int(keep.sum()) < 100:
-            break
-
-        delta = pointcloud_subset[matched_idx[keep]] - candidate_sample[keep]
-        translation = np.median(delta, axis=0)
-        translation = np.clip(translation, [-0.05, -0.03, -0.05], [0.05, 0.03, 0.05])
-        candidate = candidate + translation[None, :]
-
-        candidate_metrics = nearest_neighbor_metrics(candidate, pointcloud_subset)
-        if candidate_metrics is None:
-            break
-        candidate_score = (
-            candidate_metrics["mean_distance_m"] + 0.25 * candidate_metrics["p95_distance_m"]
+    def objective(params: np.ndarray) -> float:
+        candidate = apply_similarity_delta(
+            aligned_mesh,
+            yaw_radians=float(params[0]),
+            translation_xyz=np.asarray(params[1:4], dtype=np.float32),
+            log_scale=float(params[4]),
+        )
+        mesh_to_subset = subset_tree.query(candidate, k=1)[0]
+        subset_to_mesh = cKDTree(candidate).query(subset_sample, k=1)[0]
+        return float(
+            np.minimum(mesh_to_subset, 0.25).mean()
+            + 0.7 * np.minimum(subset_to_mesh, 0.20).mean()
+            + 1.5 * (float(params[4]) ** 2)
         )
 
-        if candidate_score + 1e-6 < best_score:
-            best_mesh = candidate.astype(np.float32)
-            best_metrics = candidate_metrics
-            best_score = candidate_score
-            accepted_steps.append(
-                {
-                    "iteration": iteration,
-                    "accepted_yaw_degrees": float(np.degrees(yaw_delta)),
-                    "accepted_translation": translation.astype(float).tolist(),
-                    "metrics": candidate_metrics,
-                }
-            )
-        else:
-            break
+    initial_params = np.zeros(5, dtype=np.float64)
+    initial_score = objective(initial_params)
+    result = minimize(
+        objective,
+        initial_params,
+        method="Powell",
+        bounds=[
+            (-np.deg2rad(30.0), np.deg2rad(30.0)),
+            (-0.20, 0.20),
+            (-0.15, 0.15),
+            (-0.20, 0.20),
+            (-0.08, 0.08),
+        ],
+        options={"maxiter": 80, "xtol": 1e-3, "ftol": 1e-3},
+    )
 
-    return best_mesh, {
+    candidate = apply_similarity_delta(
+        aligned_mesh,
+        yaw_radians=float(result.x[0]),
+        translation_xyz=np.asarray(result.x[1:4], dtype=np.float32),
+        log_scale=float(result.x[4]),
+    )
+    final_metrics = {
+        "mesh_to_subset": nearest_neighbor_metrics(candidate, subset_sample),
+        "subset_to_mesh": nearest_neighbor_metrics(subset_sample, candidate),
+    }
+
+    if not result.success or result.fun >= initial_score - 1e-4:
+        return aligned_mesh, {
+            "status": "completed",
+            "accepted": False,
+            "initial_score": initial_score,
+            "final_score": float(result.fun),
+            "initial_metrics": initial_metrics,
+            "final_metrics": initial_metrics,
+        }
+
+    return candidate, {
         "status": "completed",
-        "accepted_iterations": len(accepted_steps),
+        "accepted": True,
+        "initial_score": initial_score,
+        "final_score": float(result.fun),
         "initial_metrics": initial_metrics,
-        "accepted_steps": accepted_steps,
-        "final_metrics": nearest_neighbor_metrics(best_mesh, pointcloud_subset),
+        "final_metrics": final_metrics,
+        "optimized_delta": {
+            "yaw_degrees": float(np.degrees(result.x[0])),
+            "translation": np.asarray(result.x[1:4], dtype=float).tolist(),
+            "scale_multiplier": float(np.exp(result.x[4])),
+        },
     }
 
 
@@ -477,9 +495,15 @@ def main() -> None:
     initial_subset, initial_subset_stats = mesh_guided_alignment_subset(pointcloud, aligned_vertices)
     aligned_vertices, refinement_stats = maybe_refine_alignment(aligned_vertices, initial_subset)
     final_subset, final_subset_stats = mesh_guided_alignment_subset(pointcloud, aligned_vertices)
+    final_mesh_height = compute_mesh_height(aligned_vertices)
     alignment_stats["initial_alignment_subset"] = initial_subset_stats
     alignment_stats["refinement"] = refinement_stats
     alignment_stats["final_alignment_subset"] = final_subset_stats
+    alignment_stats["height_reference"]["aligned_mesh_height_m"] = final_mesh_height
+    alignment_stats["height_reference"]["refined_scale_multiplier"] = refinement_stats.get(
+        "optimized_delta",
+        {},
+    ).get("scale_multiplier", 1.0)
     alignment_stats["overlap_metrics"] = {
         "mesh_to_alignment_subset": nearest_neighbor_metrics(aligned_vertices, final_subset),
         "alignment_subset_to_mesh": nearest_neighbor_metrics(final_subset, aligned_vertices),
@@ -516,6 +540,7 @@ def main() -> None:
             "human_pointcloud_npy": str(pointcloud_path),
         },
         "transform": alignment_stats,
+        "estimated_human_height_m": final_mesh_height,
         "mesh_extent_before": mesh_extent_before,
         "mesh_extent_after": mesh_extent_after,
         "pointcloud_extent": pointcloud_extent,

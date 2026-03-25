@@ -16,8 +16,12 @@ from pipeline_utils import (
     backproject_depth_to_pointcloud,
     ensure_output_roots,
     load_pickle,
+    pointcloud_colors_from_rgb,
     resolve_in_outputs,
+    resize_rgb_to_shape,
     save_pointcloud_preview,
+    save_pointcloud_ply,
+    valid_depth_mask,
     write_json,
 )
 
@@ -152,19 +156,31 @@ def main() -> None:
     np.save(mask_npy, human_mask_bool.astype(np.uint8))
     save_mask_png(human_mask_bool, mask_png)
 
-    masked_depth = np.where(human_mask_bool, depth_meters, 0).astype(np.float32)
+    base_valid_mask = valid_depth_mask(depth_meters)
+    masked_valid = human_mask_bool & base_valid_mask
+    masked_depth = np.where(masked_valid, depth_meters, 0).astype(np.float32)
     np.save(masked_depth_npy, masked_depth)
 
-    human_points = backproject_depth_to_pointcloud(masked_depth, intrinsics)
+    rgb_resized = resize_rgb_to_shape(rgb, depth_meters.shape)
+    human_points, human_uv = backproject_depth_to_pointcloud(
+        depth_meters,
+        intrinsics,
+        valid_mask=masked_valid,
+        return_uv=True,
+    )
+    human_colors = pointcloud_colors_from_rgb(rgb_resized, human_uv)
     np.save(human_pc_npy, human_points)
+    human_pc_ply = clip_dir / "human_pointcloud_rgb.ply"
+    save_pointcloud_ply(human_pc_ply, human_points, colors=human_colors)
     save_pointcloud_preview(
         human_points,
         human_pc_preview,
-        title="Human Point Cloud Preview (X-Z)",
+        title="Human Point Cloud Preview",
         empty_message="No valid human 3D points",
+        colors=human_colors,
     )
 
-    stats = summarize_mask(human_mask_bool, depth_meters, human_points)
+    stats = summarize_mask(human_mask_bool, masked_depth, human_points)
     stats.update(
         {
             "clip_dir": str(clip_dir),
@@ -176,6 +192,7 @@ def main() -> None:
                 "human_mask_npy": str(mask_npy),
                 "masked_depth_meters_npy": str(masked_depth_npy),
                 "human_pointcloud_npy": str(human_pc_npy),
+                "human_pointcloud_rgb_ply": str(human_pc_ply),
                 "human_pointcloud_preview_png": str(human_pc_preview),
             },
         }

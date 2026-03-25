@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from pipeline_utils import (
     DEFAULT_OUTPUTS_DIR,
@@ -16,8 +17,12 @@ from pipeline_utils import (
     ensure_output_roots,
     load_json,
     load_pickle,
+    pointcloud_colors_from_rgb,
+    resize_rgb_to_shape,
     resolve_in_outputs,
     save_pointcloud_preview,
+    save_pointcloud_ply,
+    valid_depth_mask,
     write_json,
 )
 
@@ -145,22 +150,34 @@ def main() -> None:
     copied_depth_vis = move_into_clip_dir(depth_vis_png, clip_dir)
     copied_intr = move_into_clip_dir(intrinsics_pkl, clip_dir)
 
+    rgb = np.asarray(Image.open(copied_rgb).convert("RGB"))
     depth_meters = np.load(copied_depth_m)
     intrinsics = load_pickle(copied_intr)
+    valid_mask = valid_depth_mask(depth_meters)
     depth_stats = summarize_depth(depth_meters)
-    pointcloud = backproject_depth_to_pointcloud(depth_meters, intrinsics)
+    rgb = resize_rgb_to_shape(rgb, depth_meters.shape)
+    pointcloud, pointcloud_uv = backproject_depth_to_pointcloud(
+        depth_meters,
+        intrinsics,
+        valid_mask=valid_mask,
+        return_uv=True,
+    )
+    pointcloud_colors = pointcloud_colors_from_rgb(rgb, pointcloud_uv)
     pointcloud_stats = summarize_pointcloud(pointcloud)
 
     pointcloud_npy = clip_dir / "pointcloud.npy"
+    pointcloud_ply = clip_dir / "pointcloud_rgb.ply"
     pointcloud_preview_png = clip_dir / "pointcloud_preview.png"
     geometry_stats_json = clip_dir / "geometry_stats.json"
 
     np.save(pointcloud_npy, pointcloud)
+    save_pointcloud_ply(pointcloud_ply, pointcloud, colors=pointcloud_colors)
     save_pointcloud_preview(
         pointcloud,
         pointcloud_preview_png,
-        title="Point Cloud Preview (X-Z)",
+        title="Point Cloud Preview",
         empty_message="No valid 3D points",
+        colors=pointcloud_colors,
     )
 
     geometry_stats = {
@@ -176,6 +193,12 @@ def main() -> None:
         "source_end": manifest["source_end"],
         "source_duration": manifest["source_duration"],
         "depth_stats": depth_stats,
+        "depth_filter": {
+            "valid_points_before_filter": int((np.isfinite(depth_meters) & (depth_meters > 0)).sum()),
+            "pointcloud_points_after_filter": int(pointcloud.shape[0]),
+            "max_depth_percentile": 99.8,
+            "max_depth_m": float(depth_meters[valid_mask].max()) if pointcloud.shape[0] else None,
+        },
         "pointcloud_stats": pointcloud_stats,
         "files": {
             "mapping_json": str(copied_mapping),
@@ -186,6 +209,7 @@ def main() -> None:
             "depth_vis_png": str(copied_depth_vis),
             "intrinsics_pkl": str(copied_intr),
             "pointcloud_npy": str(pointcloud_npy),
+            "pointcloud_rgb_ply": str(pointcloud_ply),
             "pointcloud_preview_png": str(pointcloud_preview_png),
         },
     }
