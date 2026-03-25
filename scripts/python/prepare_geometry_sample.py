@@ -93,6 +93,20 @@ def move_into_clip_dir(src: Path, dst_dir: Path) -> Path:
     return dst
 
 
+def copy_into_clip_dir(src: Path, dst_dir: Path) -> Path:
+    """Copy one shared artifact into the clip folder without deleting the source."""
+    dst = dst_dir / src.name
+
+    if src.resolve() == dst.resolve():
+        return dst
+
+    if dst.exists():
+        return dst
+
+    shutil.copy2(str(src), str(dst))
+    return dst
+
+
 def main() -> None:
     """Parse arguments and build a clip-centered geometry workspace."""
     parser = argparse.ArgumentParser(
@@ -123,7 +137,7 @@ def main() -> None:
     depth_vis_png = Path(manifest["outputs"]["depth_vis_png"])
     intrinsics_pkl = Path(manifest["outputs"]["intrinsics_pkl"])
 
-    copied_mapping = move_into_clip_dir(mapping_json, clip_dir)
+    copied_mapping = copy_into_clip_dir(mapping_json, clip_dir)
     copied_manifest = move_into_clip_dir(manifest_path, clip_dir)
     copied_rgb = move_into_clip_dir(rgb_png, clip_dir)
     copied_depth_raw = move_into_clip_dir(depth_raw_npy, clip_dir)
