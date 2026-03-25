@@ -157,6 +157,28 @@ def tensor_to_list(value: Any) -> Any:
     return value
 
 
+def load_hmr2_checkpoint_compat(load_hmr2_fn: Any, checkpoint_path: str, torch_module: Any) -> tuple[Any, Any]:
+    """Load an HMR2 checkpoint with PyTorch >= 2.6 compatibility.
+
+    PyTorch 2.6 changed `torch.load(..., weights_only=...)` to default to `True`,
+    while the current upstream 4D-Humans loader still expects the historical
+    `False` behavior for its Lightning checkpoint. The checkpoint in this stage
+    is the official HMR2 release artifact downloaded by upstream code, so we
+    explicitly restore the legacy behavior only for this trusted load call.
+    """
+    original_torch_load = torch_module.load
+
+    def compat_torch_load(*args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("weights_only", False)
+        return original_torch_load(*args, **kwargs)
+
+    torch_module.load = compat_torch_load
+    try:
+        return load_hmr2_fn(checkpoint_path)
+    finally:
+        torch_module.load = original_torch_load
+
+
 def main() -> None:
     """Run HMR2 mesh recovery for one clip directory and save mesh artifacts."""
     parser = argparse.ArgumentParser(
@@ -209,7 +231,7 @@ def main() -> None:
 
     checkpoint_path = args.checkpoint or stack["DEFAULT_CHECKPOINT"]
     stack["download_models"](stack["CACHE_DIR_4DHUMANS"])
-    model, model_cfg = stack["load_hmr2"](checkpoint_path)
+    model, model_cfg = load_hmr2_checkpoint_compat(stack["load_hmr2"], checkpoint_path, torch)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()
