@@ -9,6 +9,17 @@ export ERGO_WORK_ROOT="${ERGO_WORK_ROOT:-$HOME/hzhou}"
 
 
 choose_python_bin() {
+  if [ -n "${ERGO_PYTHON:-}" ]; then
+    if [ -x "$ERGO_PYTHON" ] || command -v "$ERGO_PYTHON" >/dev/null 2>&1; then
+      printf '%s\n' "$ERGO_PYTHON"
+      return 0
+    fi
+
+    echo "Error: ERGO_PYTHON is set but not executable:"
+    echo "  $ERGO_PYTHON"
+    return 1
+  fi
+
   if command -v python3 >/dev/null 2>&1; then
     printf '%s\n' "python3"
     return 0
