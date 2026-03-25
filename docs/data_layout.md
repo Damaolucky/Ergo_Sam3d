@@ -23,7 +23,6 @@ By default, local outputs are written under:
 ~/hzhou/
   outputs/
   cache/
-  sam-3d-body/   # optional external dependency, not tracked by this repo
 ```
 
 ## Main Output Files

@@ -21,18 +21,13 @@ Verified stages:
 - scene geometry preparation
 - YOLO-based human mask generation
 - PCA-based human geometry analysis
+- HMR2 / 4D-Humans mesh recovery on the verified example clip
+- coarse mesh-to-pointcloud alignment on the verified example clip
 
-Integrated but not fully verified end-to-end:
+Current caveats:
 
-- HMR2 / 4D-Humans mesh recovery stage
-- coarse mesh-to-pointcloud alignment stage
-- current blocker for full verification: the official SMPL neutral model file is still required by HMR2
-
-Optional / pending:
-
-- SAM3D setup and trial scripts
-- Current blocker: Hugging Face access approval for `facebook/sam-3d-body-dinov3`
-- This is not a local pipeline logic failure
+- HMR2 still requires the official SMPL neutral model file
+- mesh alignment is currently a coarse PCA-based baseline, not final registration
 
 ## Data Assumptions
 
@@ -77,8 +72,6 @@ repo_root/
       setup_hmr2.sh
       run_human_mesh_recovery.sh
       run_align_mesh.sh
-      setup_sam3d_body.sh
-      run_sam3d_trial.sh
     python/
       pipeline_utils.py
       map_clip_to_frames_from_tar.py
@@ -252,6 +245,18 @@ Verified human geometry example:
 - `bbox_extent: [0.961, 2.506, 3.478]`
 - `yaw_degrees: -88.50`
 
+Verified mesh recovery example:
+
+- `num_vertices: 6890`
+- `num_joints: 44`
+- `device: cuda`
+
+Verified coarse alignment example:
+
+- point-cloud centroid: `[0.242, 0.047, 3.977]`
+- aligned mesh extent: `[1.422, 2.955, 3.437]`
+- point-cloud extent: `[0.961, 2.506, 3.478]`
+
 ## Known Limitations
 
 - Timestamps in the session tarballs are absolute millisecond timestamps and must be converted to relative seconds by subtracting the first frame time.
@@ -260,13 +265,11 @@ Verified human geometry example:
 - The current yaw estimate is only a coarse PCA-based orientation, not a reliable human facing direction.
 - HMR2 mesh recovery still requires the official SMPL neutral model file even though the checkpoint download itself is automatic.
 - The current mesh alignment stage is only a coarse PCA-based similarity transform, not a final registration method.
-- SAM3D is not yet runnable because the model checkpoint access is gated.
 
 See [docs/workflow.md](docs/workflow.md), [docs/data_layout.md](docs/data_layout.md), [docs/known_issues.md](docs/known_issues.md), and [docs/mesh_recovery.md](docs/mesh_recovery.md) for more detail.
 
 ## Next Steps
 
 - clean the human point cloud before geometry estimation
-- fully verify HMR2 mesh recovery on the example clip once the SMPL file is available
 - refine mesh-to-pointcloud alignment beyond the current coarse PCA baseline
 - evaluate orientation, scale, and position more robustly

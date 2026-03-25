@@ -23,7 +23,3 @@ The selected mesh recovery stage uses 4D-Humans / HMR2. Its model checkpoints do
 ## Mesh alignment is only a coarse initialization
 
 `align_mesh_to_pointcloud.py` currently performs a PCA-based similarity transform. This is useful for scaffolding and initial debugging, but it is not a final registration method.
-
-## SAM3D is blocked by model access approval
-
-`setup_sam3d_body.sh` and `run_sam3d_trial.sh` are kept as scaffold scripts. The current blocker is checkpoint access for `facebook/sam-3d-body-dinov3`, not a local code bug.

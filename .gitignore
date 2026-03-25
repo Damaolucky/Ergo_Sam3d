@@ -22,8 +22,6 @@ outputs/
 
 # Models and external dependencies
 yolov8n-seg.pt
-sam-3d-body/
-sam-3d-body/checkpoints/
 
 # Local secrets and config
 *.local

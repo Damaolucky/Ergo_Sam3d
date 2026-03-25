@@ -45,5 +45,5 @@ Expected verified checkpoints from this example:
 
 Current next-stage status:
 
-- HMR2 wrapper integrated, but full verification still requires the official SMPL neutral model
-- alignment stage implemented as a coarse PCA-based baseline
+- HMR2 mesh recovery verified on the example clip once the official SMPL neutral model is available
+- alignment stage verified as a coarse PCA-based baseline on the example clip

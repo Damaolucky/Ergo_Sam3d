@@ -155,9 +155,8 @@ Behavior:
 
 Current state:
 
-- integrated into the repo
-- server-compatible wrapper implemented
-- full end-to-end verification still depends on the official SMPL neutral model file
+- verified on the example clip after providing the official SMPL neutral model file
+- server-compatible wrapper implemented and tested on GPU
 
 Expected outputs:
 
@@ -183,8 +182,8 @@ Behavior:
 
 Current state:
 
-- initial implementation exists
-- intended as a scaffold / baseline for later refinement
+- verified on the example clip
+- intended as a coarse baseline for later refinement
 
 Expected outputs:
 
@@ -192,16 +191,3 @@ Expected outputs:
 - `aligned_mesh_vertices.npy`
 - `mesh_pointcloud_overlay_preview.png`
 - `alignment_stats.json`
-
-## Optional SAM3D Trial
-
-Entry points:
-
-- `scripts/bash/setup_sam3d_body.sh`
-- `scripts/bash/run_sam3d_trial.sh`
-
-Current state:
-
-- scaffold only
-- blocked by model access approval for `facebook/sam-3d-body-dinov3`
-- not yet verified end-to-end
