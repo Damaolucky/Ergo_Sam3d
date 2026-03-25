@@ -210,7 +210,7 @@ def save_one_sample(
         "sample_role": sample_spec["sample_role"],
         "position_label": sample_spec["position_label"],
         "clip_video": str(clip_path),
-        "camera": camera,
+        "camera": mapping["camera"],
         "tar_path": str(mapping["tar_path"]),
         "source_video": mapping["source_video"],
         "source_start": mapping["source_start"],
