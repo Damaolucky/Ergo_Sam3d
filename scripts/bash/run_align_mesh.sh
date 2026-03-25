@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run a coarse mesh-to-pointcloud alignment stage for one clip output folder.
+# Run the height-prior mesh-to-pointcloud alignment stage for one clip output folder.
 
 set -euo pipefail
 
