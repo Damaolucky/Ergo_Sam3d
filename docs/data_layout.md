@@ -63,6 +63,16 @@ After geometry preparation:
   mask_stats.json
   human_geometry.json
   human_pointcloud_pca_preview.png
+  human_mesh.obj
+  pred_vertices_3d.npy
+  pred_joints_3d.npy
+  smpl_params.json
+  mesh_preview.png
+  mesh_recovery_stats.json
+  aligned_mesh.obj
+  aligned_mesh_vertices.npy
+  mesh_pointcloud_overlay_preview.png
+  alignment_stats.json
 ```
 
 ## Environment Variable Overrides

@@ -6,9 +6,11 @@ This repository preserves a verified Linux pipeline for:
 2. extracting one RGB sample and one aligned depth sample,
 3. building a scene point cloud,
 4. generating a human mask and human-only point cloud,
-5. running basic PCA-based human geometry analysis.
+5. running basic PCA-based human geometry analysis,
+6. preparing a modern HMR2-based human mesh recovery stage,
+7. preparing a coarse mesh-to-pointcloud alignment stage.
 
-The outputs are intended to support later SAM3D trials and mesh-depth alignment work.
+The outputs are intended to support later mesh-depth alignment and quantitative geometry evaluation.
 
 ## Status
 
@@ -20,7 +22,13 @@ Verified stages:
 - YOLO-based human mask generation
 - PCA-based human geometry analysis
 
-Scaffold only:
+Integrated but not fully verified end-to-end:
+
+- HMR2 / 4D-Humans mesh recovery stage
+- coarse mesh-to-pointcloud alignment stage
+- current blocker for full verification: the official SMPL neutral model file is still required by HMR2
+
+Optional / pending:
 
 - SAM3D setup and trial scripts
 - Current blocker: Hugging Face access approval for `facebook/sam-3d-body-dinov3`
@@ -55,6 +63,7 @@ repo_root/
     workflow.md
     data_layout.md
     known_issues.md
+    mesh_recovery.md
   examples/
     example_commands.md
   scripts/
@@ -65,6 +74,9 @@ repo_root/
       run_prepare_geometry.sh
       run_human_mask.sh
       run_analyze_human_geometry.sh
+      setup_hmr2.sh
+      run_human_mesh_recovery.sh
+      run_align_mesh.sh
       setup_sam3d_body.sh
       run_sam3d_trial.sh
     python/
@@ -74,6 +86,8 @@ repo_root/
       prepare_geometry_sample.py
       generate_human_mask.py
       analyze_human_geometry.py
+      recover_human_mesh.py
+      align_mesh_to_pointcloud.py
 ```
 
 ## Environment Setup
@@ -106,6 +120,28 @@ Notes:
 
 - `ffmpeg` is required by `extract_sample_from_mapping.py`
 - `yolov8n-seg.pt` should not be committed; Ultralytics can download it when needed
+- the mesh recovery stage is designed around an external HMR2 / 4D-Humans install
+
+## HMR2 Mesh Recovery Setup
+
+The new mesh recovery stage uses [4D-Humans / HMR2](https://github.com/shubham-goel/4D-Humans) as an external dependency.
+
+Recommended setup:
+
+```bash
+export ERGO_WORK_ROOT=~/hzhou
+bash scripts/bash/setup_hmr2.sh
+```
+
+Important note:
+
+- HMR2 automatically downloads its checkpoints
+- HMR2 still requires the official SMPL neutral model file
+- after downloading that file yourself, rerun:
+
+```bash
+ERGO_HMR2_SMPL_SOURCE=/path/to/SMPL_NEUTRAL.pkl bash scripts/bash/setup_hmr2.sh
+```
 
 ## End-to-End Workflow
 
@@ -127,6 +163,13 @@ bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
 bash scripts/bash/run_prepare_geometry.sh "$CLIP.sample_manifest.json"
 bash scripts/bash/run_human_mask.sh "$CLIP"
 bash scripts/bash/run_analyze_human_geometry.sh "$CLIP"
+
+# Optional next-stage setup
+bash scripts/bash/setup_hmr2.sh
+
+# New next-stage steps
+bash scripts/bash/run_human_mesh_recovery.sh "$CLIP"
+bash scripts/bash/run_align_mesh.sh "$CLIP"
 ```
 
 Outputs are written under `${ERGO_WORK_ROOT:-~/hzhou}/outputs/`.
@@ -137,6 +180,8 @@ Important behavior:
 - Step 2 creates `<clip>.sample_manifest.json` and sample files in `outputs/`
 - Step 3 moves those sample files into `outputs/<clip>/`
 - Steps 4 and 5 operate on `outputs/<clip>/`
+- Step 6 writes mesh recovery artifacts into `outputs/<clip>/`
+- Step 7 writes coarse alignment artifacts into `outputs/<clip>/`
 
 ## Step Outputs
 
@@ -165,6 +210,16 @@ Important behavior:
 
 - PCA eigenvalues and axes for the human point cloud
 - centroid, bounding box extent, and coarse yaw on the X-Z plane
+
+`mesh_recovery_stats.json`
+
+- HMR2 mesh recovery metadata
+- crop box, device, checkpoint, and mesh/joint output locations
+
+`alignment_stats.json`
+
+- coarse similarity transform from recovered mesh space to human point-cloud space
+- scale, rotation, translation, and alignment notes for later refinement
 
 ## Verified Example Notes
 
@@ -203,13 +258,15 @@ Verified human geometry example:
 - YOLO segmentation masks may be produced at a lower resolution than the depth frame and must be resized with nearest-neighbor before masking depth.
 - Human point clouds can still contain background contamination.
 - The current yaw estimate is only a coarse PCA-based orientation, not a reliable human facing direction.
+- HMR2 mesh recovery still requires the official SMPL neutral model file even though the checkpoint download itself is automatic.
+- The current mesh alignment stage is only a coarse PCA-based similarity transform, not a final registration method.
 - SAM3D is not yet runnable because the model checkpoint access is gated.
 
-See [docs/workflow.md](docs/workflow.md), [docs/data_layout.md](docs/data_layout.md), and [docs/known_issues.md](docs/known_issues.md) for more detail.
+See [docs/workflow.md](docs/workflow.md), [docs/data_layout.md](docs/data_layout.md), [docs/known_issues.md](docs/known_issues.md), and [docs/mesh_recovery.md](docs/mesh_recovery.md) for more detail.
 
 ## Next Steps
 
 - clean the human point cloud before geometry estimation
-- recover a body mesh with SAM3D once checkpoint access is approved
-- align mesh outputs with depth-derived geometry
+- fully verify HMR2 mesh recovery on the example clip once the SMPL file is available
+- refine mesh-to-pointcloud alignment beyond the current coarse PCA baseline
 - evaluate orientation, scale, and position more robustly

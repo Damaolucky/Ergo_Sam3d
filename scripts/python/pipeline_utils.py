@@ -9,7 +9,6 @@ import pickle
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -124,6 +123,8 @@ def save_pointcloud_preview(
     max_points: int = 20000,
 ) -> None:
     """Save a lightweight X-Z scatter preview of a point cloud."""
+    import matplotlib.pyplot as plt
+
     out_png.parent.mkdir(parents=True, exist_ok=True)
 
     if points.shape[0] == 0:
@@ -150,6 +151,8 @@ def save_pointcloud_preview(
 
 def save_depth_vis(depth_meters: np.ndarray, out_png: Path) -> None:
     """Render a percentile-clipped depth visualization."""
+    import matplotlib.pyplot as plt
+
     out_png.parent.mkdir(parents=True, exist_ok=True)
 
     arr = np.asarray(depth_meters, dtype=np.float32)

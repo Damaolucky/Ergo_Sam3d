@@ -8,7 +8,9 @@ The pipeline converts one annotated lift clip into:
 - one RGB sample and one aligned depth sample,
 - a scene point cloud,
 - a human mask and human-only point cloud,
-- a coarse PCA-based human geometry summary.
+- a coarse PCA-based human geometry summary,
+- a recovered human mesh and joints,
+- a coarse mesh-to-pointcloud alignment.
 
 ## Verified Run Order
 
@@ -30,6 +32,11 @@ bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
 bash scripts/bash/run_prepare_geometry.sh "$CLIP.sample_manifest.json"
 bash scripts/bash/run_human_mask.sh "$CLIP"
 bash scripts/bash/run_analyze_human_geometry.sh "$CLIP"
+
+# New next-stage setup and execution
+bash scripts/bash/setup_hmr2.sh
+bash scripts/bash/run_human_mesh_recovery.sh "$CLIP"
+bash scripts/bash/run_align_mesh.sh "$CLIP"
 ```
 
 ## Stage Details
@@ -130,6 +137,61 @@ Verified example output:
 - `centroid: [0.242, 0.047, 3.977]`
 - `bbox_extent: [0.961, 2.506, 3.478]`
 - `yaw_degrees: -88.50`
+
+### 6. Human mesh recovery
+
+Entry points:
+
+- `scripts/bash/setup_hmr2.sh`
+- `scripts/bash/run_human_mesh_recovery.sh`
+- `scripts/python/recover_human_mesh.py`
+
+Behavior:
+
+- clones and installs 4D-Humans / HMR2 as an external dependency
+- uses the verified `human_mask.npy` to define the crop box
+- runs HMR2 on the RGB sample
+- saves mesh, joints, SMPL-style parameters, preview, and recovery stats
+
+Current state:
+
+- integrated into the repo
+- server-compatible wrapper implemented
+- full end-to-end verification still depends on the official SMPL neutral model file
+
+Expected outputs:
+
+- `human_mesh.obj`
+- `pred_vertices_3d.npy`
+- `pred_joints_3d.npy`
+- `smpl_params.json`
+- `mesh_preview.png`
+- `mesh_recovery_stats.json`
+
+### 7. Mesh-to-pointcloud coarse alignment
+
+Entry points:
+
+- `scripts/bash/run_align_mesh.sh`
+- `scripts/python/align_mesh_to_pointcloud.py`
+
+Behavior:
+
+- loads the recovered mesh and `human_pointcloud.npy`
+- computes a coarse PCA-based similarity transform
+- writes an aligned mesh and an overlay preview
+
+Current state:
+
+- initial implementation exists
+- intended as a scaffold / baseline for later refinement
+
+Expected outputs:
+
+- `aligned_mesh.obj`
+- `aligned_mesh_vertices.npy`
+- `mesh_pointcloud_overlay_preview.png`
+- `alignment_stats.json`
 
 ## Optional SAM3D Trial
 

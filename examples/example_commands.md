@@ -25,6 +25,15 @@ bash scripts/bash/run_human_mask.sh "$CLIP"
 
 # Step 5: run PCA-based geometry analysis
 bash scripts/bash/run_analyze_human_geometry.sh "$CLIP"
+
+# Step 6: setup HMR2 / 4D-Humans once
+bash scripts/bash/setup_hmr2.sh
+
+# Step 7: recover a human mesh with HMR2
+bash scripts/bash/run_human_mesh_recovery.sh "$CLIP"
+
+# Step 8: run the coarse mesh-to-pointcloud alignment scaffold
+bash scripts/bash/run_align_mesh.sh "$CLIP"
 ```
 
 Expected verified checkpoints from this example:
@@ -33,3 +42,8 @@ Expected verified checkpoints from this example:
 - geometry: `pointcloud points 800479`
 - mask: `human_point_count 45045`
 - human geometry: `yaw_degrees -88.50`
+
+Current next-stage status:
+
+- HMR2 wrapper integrated, but full verification still requires the official SMPL neutral model
+- alignment stage implemented as a coarse PCA-based baseline
