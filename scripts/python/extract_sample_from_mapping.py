@@ -109,23 +109,39 @@ def extract_rgb_from_clip_time(
     *,
     fps_hint: float | None,
 ) -> None:
-    """Extract one RGB frame from the clip video at a chosen clip-relative time."""
+    """Extract one RGB frame from the clip video at a chosen clip-relative time.
+
+    Endpoint clips can occasionally fail to emit a frame exactly at the nominal
+    last timestamp. When that happens, step backward by a few frames until a
+    valid PNG appears.
+    """
     ffmpeg_bin = ensure_ffmpeg()
     frame_guard = 1.0 / max(float(fps_hint or 30.0), 1.0)
     max_seek = max(duration_sec - frame_guard, 0.0)
     sample_time = min(max(clip_time_sec, 0.0), max_seek)
-    cmd = [
-        ffmpeg_bin,
-        "-y",
-        "-ss",
-        f"{sample_time:.6f}",
-        "-i",
-        str(clip_path),
-        "-frames:v",
-        "1",
-        str(out_png),
+    candidate_times = [sample_time] + [
+        max(sample_time - step * frame_guard, 0.0) for step in range(1, 6)
     ]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    for candidate_time in candidate_times:
+        if out_png.exists():
+            out_png.unlink()
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-ss",
+            f"{candidate_time:.6f}",
+            "-i",
+            str(clip_path),
+            "-frames:v",
+            "1",
+            str(out_png),
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if out_png.exists() and out_png.stat().st_size > 0:
+            return
+
+    raise RuntimeError(f"ffmpeg did not produce a frame for {clip_path} near {sample_time:.6f}s")
 
 
 def resolve_mapping_path(mapping_arg: str) -> Path:
