@@ -8,7 +8,7 @@ This repository preserves a verified Linux pipeline for:
 4. generating a human mask and human-only point cloud,
 5. running basic PCA-based human geometry analysis,
 6. preparing a modern HMR2-based human mesh recovery stage,
-7. preparing a coarse mesh-to-pointcloud alignment stage.
+7. preparing a height-prior mesh-to-pointcloud alignment stage.
 
 The outputs are intended to support later mesh-depth alignment and quantitative geometry evaluation.
 
@@ -22,12 +22,12 @@ Verified stages:
 - YOLO-based human mask generation
 - PCA-based human geometry analysis
 - HMR2 / 4D-Humans mesh recovery on the verified example clip
-- coarse mesh-to-pointcloud alignment on the verified example clip
+- height-prior mesh-to-pointcloud alignment on the verified example clip
 
 Current caveats:
 
 - HMR2 still requires the official SMPL neutral model file
-- mesh alignment is currently a coarse PCA-based baseline, not final registration
+- mesh alignment is still a baseline, not final registration
 
 ## Data Assumptions
 
@@ -163,6 +163,9 @@ bash scripts/bash/setup_hmr2.sh
 # New next-stage steps
 bash scripts/bash/run_human_mesh_recovery.sh "$CLIP"
 bash scripts/bash/run_align_mesh.sh "$CLIP"
+
+# Optional: if the subject's real height is known, use it directly for scale calibration
+bash scripts/bash/run_align_mesh.sh "$CLIP" --target-human-height-m 1.72
 ```
 
 Outputs are written under `${ERGO_WORK_ROOT:-~/hzhou}/outputs/`.
@@ -174,7 +177,7 @@ Important behavior:
 - Step 3 moves those sample files into `outputs/<clip>/`
 - Steps 4 and 5 operate on `outputs/<clip>/`
 - Step 6 writes mesh recovery artifacts into `outputs/<clip>/`
-- Step 7 writes coarse alignment artifacts into `outputs/<clip>/`
+- Step 7 writes height-prior alignment artifacts into `outputs/<clip>/`
 
 ## Step Outputs
 
@@ -211,8 +214,8 @@ Important behavior:
 
 `alignment_stats.json`
 
-- coarse similarity transform from recovered mesh space to human point-cloud space
-- scale, rotation, translation, and alignment notes for later refinement
+- yaw-only transform from recovered mesh space to human point-cloud space
+- optional height calibration, lower-body anchoring, and height-reference stats for later cabinet-height estimation
 
 ## Verified Example Notes
 
@@ -251,11 +254,12 @@ Verified mesh recovery example:
 - `num_joints: 44`
 - `device: cuda`
 
-Verified coarse alignment example:
+Verified height-prior alignment example:
 
-- point-cloud centroid: `[0.242, 0.047, 3.977]`
-- aligned mesh extent: `[1.422, 2.955, 3.437]`
-- point-cloud extent: `[0.961, 2.506, 3.478]`
+- aligned mesh extent: approximately `[1.027, 1.658, 0.722]` with native mesh height prior
+- `mesh_native_height_m`: approximately `1.55`
+- `observed_pointcloud_height_raw_m`: approximately `2.23`
+- the new alignment intentionally avoids scaling the mesh to match contaminated point-cloud depth thickness
 
 ## Known Limitations
 
@@ -264,12 +268,13 @@ Verified coarse alignment example:
 - Human point clouds can still contain background contamination.
 - The current yaw estimate is only a coarse PCA-based orientation, not a reliable human facing direction.
 - HMR2 mesh recovery still requires the official SMPL neutral model file even though the checkpoint download itself is automatic.
-- The current mesh alignment stage is only a coarse PCA-based similarity transform, not a final registration method.
+- The current mesh alignment stage is yaw-only and height-prior; it is more stable than full 3D PCA, but it is still not a final registration method.
 
 See [docs/workflow.md](docs/workflow.md), [docs/data_layout.md](docs/data_layout.md), [docs/known_issues.md](docs/known_issues.md), and [docs/mesh_recovery.md](docs/mesh_recovery.md) for more detail.
 
 ## Next Steps
 
 - clean the human point cloud before geometry estimation
-- refine mesh-to-pointcloud alignment beyond the current coarse PCA baseline
+- estimate cabinet geometry in the same depth frame and compare its top height against the aligned human height reference
+- refine mesh-to-pointcloud alignment beyond the current height-prior baseline
 - evaluate orientation, scale, and position more robustly

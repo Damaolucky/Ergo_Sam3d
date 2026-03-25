@@ -10,7 +10,7 @@ The pipeline converts one annotated lift clip into:
 - a human mask and human-only point cloud,
 - a coarse PCA-based human geometry summary,
 - a recovered human mesh and joints,
-- a coarse mesh-to-pointcloud alignment.
+- a height-prior mesh-to-pointcloud alignment.
 
 ## Verified Run Order
 
@@ -37,6 +37,7 @@ bash scripts/bash/run_analyze_human_geometry.sh "$CLIP"
 bash scripts/bash/setup_hmr2.sh
 bash scripts/bash/run_human_mesh_recovery.sh "$CLIP"
 bash scripts/bash/run_align_mesh.sh "$CLIP"
+bash scripts/bash/run_align_mesh.sh "$CLIP" --target-human-height-m 1.72
 ```
 
 ## Stage Details
@@ -167,7 +168,7 @@ Expected outputs:
 - `mesh_preview.png`
 - `mesh_recovery_stats.json`
 
-### 7. Mesh-to-pointcloud coarse alignment
+### 7. Mesh-to-pointcloud height-prior alignment
 
 Entry points:
 
@@ -177,13 +178,17 @@ Entry points:
 Behavior:
 
 - loads the recovered mesh and `human_pointcloud.npy`
-- computes a coarse PCA-based similarity transform
+- keeps the camera vertical axis fixed
+- estimates only a yaw rotation in the X-Z plane
+- uses the mesh's native human-height prior by default
+- optionally accepts `--target-human-height-m` for explicit scale calibration
+- uses torso-centered X/Z anchors and a lower-body Y anchor
 - writes an aligned mesh and an overlay preview
 
 Current state:
 
 - verified on the example clip
-- intended as a coarse baseline for later refinement
+- intended as a baseline for later refinement and cabinet-height reasoning
 
 Expected outputs:
 

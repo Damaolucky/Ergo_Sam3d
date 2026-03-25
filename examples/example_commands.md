@@ -32,8 +32,11 @@ bash scripts/bash/setup_hmr2.sh
 # Step 7: recover a human mesh with HMR2
 bash scripts/bash/run_human_mesh_recovery.sh "$CLIP"
 
-# Step 8: run the coarse mesh-to-pointcloud alignment scaffold
+# Step 8: run the height-prior mesh-to-pointcloud alignment
 bash scripts/bash/run_align_mesh.sh "$CLIP"
+
+# Optional: use a known subject height to set the final scale explicitly
+bash scripts/bash/run_align_mesh.sh "$CLIP" --target-human-height-m 1.72
 ```
 
 Expected verified checkpoints from this example:
@@ -46,4 +49,4 @@ Expected verified checkpoints from this example:
 Current next-stage status:
 
 - HMR2 mesh recovery verified on the example clip once the official SMPL neutral model is available
-- alignment stage verified as a coarse PCA-based baseline on the example clip
+- alignment stage verified as a height-prior baseline on the example clip

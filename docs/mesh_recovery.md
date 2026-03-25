@@ -85,7 +85,9 @@ Current behavior:
 
 - loads `human_mesh.obj`
 - loads `human_pointcloud.npy`
-- computes a coarse PCA-based similarity transform
+- preserves the camera vertical axis and solves only for yaw
+- keeps the mesh's native human-height prior by default
+- accepts `--target-human-height-m` when a known subject height is available
 - saves `aligned_mesh.obj`
 - saves `aligned_mesh_vertices.npy`
 - saves `mesh_pointcloud_overlay_preview.png`
@@ -93,4 +95,4 @@ Current behavior:
 
 Current limitation:
 
-- this is a coarse initialization only, not a final alignment method
+- this is a baseline initialization only, not a final alignment method

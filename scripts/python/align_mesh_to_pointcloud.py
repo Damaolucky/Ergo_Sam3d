@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Coarsely align a recovered human mesh to the depth-derived human point cloud."""
+"""Align a recovered human mesh to the depth-derived human point cloud.
+
+This stage now prioritizes physically meaningful constraints for later height
+reasoning:
+
+- preserve the camera vertical axis (`Y`) instead of allowing full 3D PCA rotation
+- estimate only a yaw rotation in the X-Z plane
+- translate using torso-centered X/Z anchors and a lower-body Y anchor
+- keep the mesh's native human-height prior by default, with an optional
+  user-provided target human height for explicit scale calibration
+"""
 
 from __future__ import annotations
 
@@ -10,6 +20,9 @@ from pathlib import Path
 import numpy as np
 
 from pipeline_utils import ensure_output_roots, resolve_in_outputs, write_json
+
+
+PREVIEW_RNG = np.random.default_rng(0)
 
 
 def resolve_clip_dir(clip_arg: str) -> Path:
@@ -43,85 +56,230 @@ def save_obj(path: Path, vertices: np.ndarray, faces: np.ndarray) -> None:
             handle.write(f"f {int(face[0]) + 1} {int(face[1]) + 1} {int(face[2]) + 1}\n")
 
 
-def compute_pca(points: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute centroid, eigenvalues, and a right-handed PCA basis."""
-    centroid = points.mean(axis=0)
-    centered = points - centroid
-    covariance = np.cov(centered, rowvar=False)
+def robust_percentile_range(values: np.ndarray, low: float, high: float) -> float:
+    """Return a robust axis range between two percentiles."""
+    lower, upper = np.percentile(values, [low, high])
+    return float(upper - lower)
+
+
+def robust_point_cloud_subset(pointcloud: np.ndarray) -> np.ndarray:
+    """Drop the most obvious background outliers before alignment statistics.
+
+    The current human mask can still leak background surfaces. For alignment we
+    keep the central depth band and a near-full X range, which is enough to
+    stabilize yaw and translation without deleting most of the body.
+    """
+    z_median = float(np.median(pointcloud[:, 2]))
+    z_mad = float(np.median(np.abs(pointcloud[:, 2] - z_median)))
+    z_band = max(0.35, 2.5 * z_mad)
+
+    x_low, x_high = np.percentile(pointcloud[:, 0], [1, 99])
+    keep = (
+        (np.abs(pointcloud[:, 2] - z_median) <= z_band)
+        & (pointcloud[:, 0] >= x_low)
+        & (pointcloud[:, 0] <= x_high)
+    )
+    subset = pointcloud[keep]
+    if subset.shape[0] < max(1000, pointcloud.shape[0] // 10):
+        return pointcloud
+    return subset
+
+
+def torso_subset(points: np.ndarray) -> np.ndarray:
+    """Select a torso-heavy subset for yaw and center estimation."""
+    y_low, y_high = np.percentile(points[:, 1], [20, 80])
+    z_median = float(np.median(points[:, 2]))
+    z_mad = float(np.median(np.abs(points[:, 2] - z_median)))
+    z_band = max(0.35, 2.5 * z_mad)
+
+    keep = (
+        (points[:, 1] >= y_low)
+        & (points[:, 1] <= y_high)
+        & (np.abs(points[:, 2] - z_median) <= z_band)
+    )
+    subset = points[keep]
+    if subset.shape[0] < max(200, points.shape[0] // 20):
+        return points
+    return subset
+
+
+def yaw_from_xz(points: np.ndarray) -> float:
+    """Estimate a body yaw angle from torso points in the X-Z plane."""
+    pts = torso_subset(points)
+    xz = pts[:, [0, 2]] - pts[:, [0, 2]].mean(axis=0, keepdims=True)
+    covariance = np.cov(xz, rowvar=False)
     eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-    order = np.argsort(eigenvalues)[::-1]
-    eigenvalues = eigenvalues[order]
-    eigenvectors = eigenvectors[:, order]
-
-    if np.linalg.det(eigenvectors) < 0:
-        eigenvectors[:, -1] *= -1.0
-    return centroid, eigenvalues, eigenvectors
+    principal = eigenvectors[:, np.argmax(eigenvalues)]
+    return float(np.arctan2(principal[1], principal[0]))
 
 
-def coarse_similarity_align(mesh_vertices: np.ndarray, pointcloud: np.ndarray) -> tuple[np.ndarray, dict]:
-    """Apply a coarse similarity transform by matching PCA frames and scale."""
-    mesh_centroid, mesh_eigvals, mesh_basis = compute_pca(mesh_vertices)
-    pc_centroid, pc_eigvals, pc_basis = compute_pca(pointcloud)
+def yaw_rotation_matrix(yaw_radians: float) -> np.ndarray:
+    """Return a rotation matrix for a yaw-only rotation around the camera Y axis."""
+    c = float(np.cos(yaw_radians))
+    s = float(np.sin(yaw_radians))
+    return np.asarray(
+        [
+            [c, 0.0, s],
+            [0.0, 1.0, 0.0],
+            [-s, 0.0, c],
+        ],
+        dtype=np.float32,
+    )
 
-    mesh_std = np.sqrt(np.maximum(mesh_eigvals, 1e-8))
-    pc_std = np.sqrt(np.maximum(pc_eigvals, 1e-8))
-    scale = float(np.median(pc_std / mesh_std))
 
-    rotation = pc_basis @ mesh_basis.T
-    if np.linalg.det(rotation) < 0:
-        pc_basis[:, -1] *= -1.0
-        rotation = pc_basis @ mesh_basis.T
+def compute_mesh_height(vertices: np.ndarray) -> float:
+    """Compute a robust mesh height along the vertical camera axis."""
+    return robust_percentile_range(vertices[:, 1], 1, 99)
 
-    transformed = (mesh_vertices - mesh_centroid) @ rotation.T
-    transformed = transformed * scale + pc_centroid
-    translation = pc_centroid - scale * (mesh_centroid @ rotation.T)
+
+def choose_scale(mesh_vertices: np.ndarray, target_human_height_m: float | None) -> tuple[float, dict]:
+    """Choose a physically meaningful scale for alignment."""
+    mesh_native_height = compute_mesh_height(mesh_vertices)
+    if mesh_native_height <= 1e-6:
+        raise ValueError("Mesh height is degenerate and cannot be used for alignment.")
+
+    if target_human_height_m is not None:
+        scale = float(target_human_height_m / mesh_native_height)
+        mode = "target_human_height"
+    else:
+        scale = 1.0
+        mode = "mesh_native_height_prior"
+
+    return scale, {
+        "mode": mode,
+        "mesh_native_height_m": mesh_native_height,
+        "target_human_height_m": target_human_height_m,
+        "applied_scale": scale,
+    }
+
+
+def align_mesh_height_prior(
+    mesh_vertices: np.ndarray,
+    pointcloud: np.ndarray,
+    *,
+    target_human_height_m: float | None,
+    bottom_anchor_percentile: float,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Align the mesh using yaw-only rotation and height-prior translation."""
+    pointcloud_subset = robust_point_cloud_subset(pointcloud)
+
+    pc_yaw = yaw_from_xz(pointcloud_subset)
+    mesh_yaw = yaw_from_xz(mesh_vertices)
+
+    yaw_delta = pc_yaw - mesh_yaw
+    rotation = yaw_rotation_matrix(yaw_delta)
+    rotated_mesh = mesh_vertices @ rotation.T
+
+    scale, scale_stats = choose_scale(rotated_mesh, target_human_height_m)
+    scaled_mesh = rotated_mesh * scale
+
+    pc_torso = torso_subset(pointcloud_subset)
+    mesh_torso = torso_subset(scaled_mesh)
+
+    translation_x = float(np.median(pc_torso[:, 0]) - np.median(mesh_torso[:, 0]))
+    translation_z = float(np.median(pc_torso[:, 2]) - np.median(mesh_torso[:, 2]))
+    translation_y = float(
+        np.percentile(pointcloud_subset[:, 1], bottom_anchor_percentile)
+        - np.percentile(scaled_mesh[:, 1], bottom_anchor_percentile)
+    )
+    translation = np.asarray([translation_x, translation_y, translation_z], dtype=np.float32)
+
+    aligned_mesh = scaled_mesh + translation[None, :]
+
+    observed_height_raw = robust_percentile_range(pointcloud[:, 1], 5, 95)
+    observed_height_subset = robust_percentile_range(pointcloud_subset[:, 1], 5, 95)
+    aligned_height = compute_mesh_height(aligned_mesh)
 
     stats = {
-        "mesh_centroid_before": mesh_centroid.tolist(),
-        "pointcloud_centroid": pc_centroid.tolist(),
-        "uniform_scale": scale,
+        "alignment_method": "height_prior_yaw_only",
+        "yaw_radians": yaw_delta,
+        "yaw_degrees": float(np.degrees(yaw_delta)),
         "rotation_matrix": rotation.tolist(),
         "translation": translation.tolist(),
-        "mesh_pca_std_before": mesh_std.tolist(),
-        "pointcloud_pca_std": pc_std.tolist(),
+        "bottom_anchor_percentile": bottom_anchor_percentile,
+        "pointcloud_subset_count": int(pointcloud_subset.shape[0]),
+        "pointcloud_torso_count": int(pc_torso.shape[0]),
+        "mesh_torso_count": int(mesh_torso.shape[0]),
+        "pointcloud_torso_median": np.median(pc_torso, axis=0).tolist(),
+        "mesh_torso_median_before_translation": np.median(mesh_torso, axis=0).tolist(),
+        "height_reference": {
+            **scale_stats,
+            "aligned_mesh_height_m": aligned_height,
+            "observed_pointcloud_height_raw_m": observed_height_raw,
+            "observed_pointcloud_height_subset_m": observed_height_subset,
+            "pointcloud_bottom_y_m": float(np.percentile(pointcloud_subset[:, 1], bottom_anchor_percentile)),
+            "aligned_mesh_bottom_y_m": float(np.percentile(aligned_mesh[:, 1], bottom_anchor_percentile)),
+        },
     }
-    return transformed.astype(np.float32), stats
+    return aligned_mesh.astype(np.float32), pointcloud_subset.astype(np.float32), stats
 
 
-def save_overlay_preview(mesh_vertices: np.ndarray, pointcloud: np.ndarray, out_png: Path) -> None:
-    """Save a simple X-Z overlay preview of the aligned mesh and human point cloud."""
+def sample_points(points: np.ndarray, max_points: int) -> np.ndarray:
+    """Down-sample a dense point set for preview rendering."""
+    if points.shape[0] <= max_points:
+        return points
+    indices = PREVIEW_RNG.choice(points.shape[0], size=max_points, replace=False)
+    return points[indices]
+
+
+def save_overlay_preview(
+    aligned_mesh: np.ndarray,
+    pointcloud: np.ndarray,
+    pointcloud_subset: np.ndarray,
+    out_png: Path,
+) -> None:
+    """Save X-Z and Y-Z overlay previews of the aligned mesh and point cloud."""
     import matplotlib.pyplot as plt
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
 
-    pc_sample = pointcloud
-    if pointcloud.shape[0] > 20000:
-        pc_sample = pointcloud[np.random.choice(pointcloud.shape[0], 20000, replace=False)]
+    raw_sample = sample_points(pointcloud, 12000)
+    subset_sample = sample_points(pointcloud_subset, 12000)
+    mesh_sample = sample_points(aligned_mesh, 8000)
 
-    mesh_sample = mesh_vertices
-    if mesh_vertices.shape[0] > 8000:
-        mesh_sample = mesh_vertices[np.random.choice(mesh_vertices.shape[0], 8000, replace=False)]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    plt.figure(figsize=(7, 5))
-    plt.scatter(pc_sample[:, 0], pc_sample[:, 2], s=0.2, label="human point cloud")
-    plt.scatter(mesh_sample[:, 0], mesh_sample[:, 2], s=0.2, label="aligned mesh")
-    plt.xlabel("X (meters)")
-    plt.ylabel("Z (meters)")
-    plt.title("Mesh / Point Cloud Overlay (X-Z)")
-    plt.legend(markerscale=8)
-    plt.tight_layout()
-    plt.savefig(out_png, dpi=150)
-    plt.close()
+    axes[0].scatter(raw_sample[:, 0], raw_sample[:, 2], s=0.15, alpha=0.12, label="raw point cloud")
+    axes[0].scatter(subset_sample[:, 0], subset_sample[:, 2], s=0.2, alpha=0.35, label="alignment subset")
+    axes[0].scatter(mesh_sample[:, 0], mesh_sample[:, 2], s=0.2, alpha=0.6, label="aligned mesh")
+    axes[0].set_xlabel("X (meters)")
+    axes[0].set_ylabel("Z (meters)")
+    axes[0].set_title("Overlay (X-Z)")
+    axes[0].legend(markerscale=8)
+
+    axes[1].scatter(raw_sample[:, 2], raw_sample[:, 1], s=0.15, alpha=0.12, label="raw point cloud")
+    axes[1].scatter(subset_sample[:, 2], subset_sample[:, 1], s=0.2, alpha=0.35, label="alignment subset")
+    axes[1].scatter(mesh_sample[:, 2], mesh_sample[:, 1], s=0.2, alpha=0.6, label="aligned mesh")
+    axes[1].set_xlabel("Z (meters)")
+    axes[1].set_ylabel("Y (meters)")
+    axes[1].set_title("Overlay (Z-Y)")
+    axes[1].legend(markerscale=8)
+
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=150)
+    plt.close(fig)
 
 
 def main() -> None:
-    """Run a coarse mesh-to-pointcloud alignment and save the transform outputs."""
+    """Run a height-prior mesh-to-pointcloud alignment and save the outputs."""
     parser = argparse.ArgumentParser(
-        description="Coarsely align a recovered human mesh to the depth-derived human point cloud."
+        description="Align a recovered human mesh to the depth-derived human point cloud."
     )
     parser.add_argument(
         "clip_dir",
         help="Clip output folder name or path, e.g. 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4",
+    )
+    parser.add_argument(
+        "--target-human-height-m",
+        type=float,
+        default=None,
+        help="Optional known human height in meters. If omitted, keep the mesh's native height prior.",
+    )
+    parser.add_argument(
+        "--bottom-anchor-percentile",
+        type=float,
+        default=95.0,
+        help="Percentile used to align the lower body along camera Y (default: 95).",
     )
     args = parser.parse_args()
 
@@ -148,7 +306,12 @@ def main() -> None:
     if mesh_vertices.shape[0] < 10:
         raise ValueError("human_mesh.obj does not contain enough vertices for alignment.")
 
-    aligned_vertices, alignment_stats = coarse_similarity_align(mesh_vertices, pointcloud)
+    aligned_vertices, pointcloud_subset, alignment_stats = align_mesh_height_prior(
+        mesh_vertices,
+        pointcloud,
+        target_human_height_m=args.target_human_height_m,
+        bottom_anchor_percentile=args.bottom_anchor_percentile,
+    )
 
     aligned_mesh_path = clip_dir / "aligned_mesh.obj"
     aligned_vertices_path = clip_dir / "aligned_mesh_vertices.npy"
@@ -157,14 +320,15 @@ def main() -> None:
 
     save_obj(aligned_mesh_path, aligned_vertices, mesh_faces)
     np.save(aligned_vertices_path, aligned_vertices)
-    save_overlay_preview(aligned_vertices, pointcloud, overlay_path)
+    save_overlay_preview(aligned_vertices, pointcloud, pointcloud_subset, overlay_path)
 
     mesh_extent_before = (mesh_vertices.max(axis=0) - mesh_vertices.min(axis=0)).tolist()
     mesh_extent_after = (aligned_vertices.max(axis=0) - aligned_vertices.min(axis=0)).tolist()
     pointcloud_extent = (pointcloud.max(axis=0) - pointcloud.min(axis=0)).tolist()
+    pointcloud_subset_extent = (pointcloud_subset.max(axis=0) - pointcloud_subset.min(axis=0)).tolist()
 
     payload = {
-        "status": "coarse_alignment_complete",
+        "status": "height_prior_alignment_complete",
         "clip_dir": str(clip_dir),
         "inputs": {
             "human_mesh_obj": str(mesh_path),
@@ -174,6 +338,7 @@ def main() -> None:
         "mesh_extent_before": mesh_extent_before,
         "mesh_extent_after": mesh_extent_after,
         "pointcloud_extent": pointcloud_extent,
+        "pointcloud_subset_extent": pointcloud_subset_extent,
         "outputs": {
             "aligned_mesh_obj": str(aligned_mesh_path),
             "aligned_mesh_vertices_npy": str(aligned_vertices_path),
@@ -181,13 +346,14 @@ def main() -> None:
             "alignment_stats_json": str(stats_path),
         },
         "notes": [
-            "This is a coarse PCA-based similarity alignment, not a final registration method.",
-            "Future work can replace this with ICP, correspondences, or torso/pelvis-aware alignment.",
+            "This alignment preserves the camera vertical axis and solves only for yaw, translation, and optional height-based scale.",
+            "By default the mesh keeps its native human-height prior; pass --target-human-height-m when the subject's height is known.",
+            "The point-cloud subset is only used to stabilize alignment against mask leakage and background contamination.",
         ],
         "todo": [
-            "Reject background outliers in the human point cloud before alignment.",
-            "Use a body-centric anchor such as pelvis or torso instead of whole-shape PCA alone.",
-            "Add quantitative alignment error metrics once mesh recovery is verified end-to-end.",
+            "Estimate cabinet geometry in the same depth frame and compare its top height against the aligned human height reference.",
+            "Replace the current subset heuristic with a more explicit body-only point-cloud cleaning stage.",
+            "Add quantitative overlap metrics once cabinet and floor landmarks are available.",
         ],
     }
     write_json(stats_path, payload)

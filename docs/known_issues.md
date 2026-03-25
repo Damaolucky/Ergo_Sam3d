@@ -22,4 +22,4 @@ The selected mesh recovery stage uses 4D-Humans / HMR2. Its model checkpoints do
 
 ## Mesh alignment is only a coarse initialization
 
-`align_mesh_to_pointcloud.py` currently performs a PCA-based similarity transform. This is useful for scaffolding and initial debugging, but it is not a final registration method.
+`align_mesh_to_pointcloud.py` currently uses a yaw-only, height-prior alignment. This is more stable than the older full-3D PCA transform, but it is still only an initialization and not a final registration method.
