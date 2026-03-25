@@ -28,31 +28,61 @@ from pipeline_utils import (
 )
 
 
-def extract_tar_bytes(tf: tarfile.TarFile, member_name: str) -> bytes:
-    """Extract raw bytes for one tar member."""
-    member = tf.getmember(member_name)
-    handle = tf.extractfile(member)
-    if handle is None:
-        raise FileNotFoundError(f"Could not extract tar member: {member_name}")
-    return handle.read()
+def load_npy_from_bytes(payload: bytes) -> np.ndarray:
+    """Load one NumPy array from raw tar bytes."""
+    return np.load(io.BytesIO(payload), allow_pickle=True)
 
 
-def load_npy_from_tar(tf: tarfile.TarFile, member_name: str) -> np.ndarray:
-    """Load one NumPy array from the tarball."""
-    return np.load(io.BytesIO(extract_tar_bytes(tf, member_name)), allow_pickle=True)
+def load_pickle_from_bytes(payload: bytes) -> Any:
+    """Load one pickle object from raw tar bytes."""
+    return pickle.loads(payload)
 
 
-def load_pickle_from_tar(tf: tarfile.TarFile, member_name: str) -> Any:
-    """Load one pickle object from the tarball."""
-    return pickle.loads(extract_tar_bytes(tf, member_name))
+def collect_required_tar_bytes(
+    tar_path: Path,
+    *,
+    exact_members: dict[str, str],
+    suffix_members: dict[str, str],
+) -> dict[str, bytes]:
+    """Stream a tar.gz once and collect only the required members."""
+    remaining_exact = dict(exact_members)
+    remaining_suffix = dict(suffix_members)
+    found: dict[str, bytes] = {}
 
+    with tarfile.open(tar_path, "r|gz") as tf:
+        for member in tf:
+            if not member.isfile():
+                continue
 
-def find_member_by_suffix(tf: tarfile.TarFile, suffix: str) -> str:
-    """Find the shortest tar member path that matches a suffix."""
-    matches = [member.name for member in tf.getmembers() if member.isfile() and member.name.endswith(suffix)]
-    if not matches:
-        raise FileNotFoundError(f"Could not find member ending with: {suffix}")
-    return sorted(matches, key=len)[0]
+            alias = None
+            if member.name in remaining_exact.values():
+                for key, exact_name in list(remaining_exact.items()):
+                    if member.name == exact_name:
+                        alias = key
+                        del remaining_exact[key]
+                        break
+            else:
+                for key, suffix in list(remaining_suffix.items()):
+                    if member.name.endswith(suffix):
+                        alias = key
+                        del remaining_suffix[key]
+                        break
+
+            if alias is None:
+                continue
+
+            handle = tf.extractfile(member)
+            if handle is None:
+                raise FileNotFoundError(f"Could not extract tar member: {member.name}")
+            found[alias] = handle.read()
+
+            if not remaining_exact and not remaining_suffix:
+                break
+
+    missing = list(remaining_exact.keys()) + list(remaining_suffix.keys())
+    if missing:
+        raise FileNotFoundError(f"Missing required tar members: {missing}")
+    return found
 
 
 def ensure_ffmpeg() -> str:
@@ -141,8 +171,7 @@ def save_one_sample(
     mapping_path: Path,
     mapping: dict[str, Any],
     clip_path: Path,
-    tf: tarfile.TarFile,
-    camera: str,
+    raw_depth_bytes: bytes,
     depth_scale: float,
     intrinsics: Any,
     sample_spec: dict[str, Any],
@@ -165,13 +194,7 @@ def save_one_sample(
         fps_hint=mapping.get("approx_color_fps"),
     )
 
-    depth_member = sample_spec["nearest_depth_frame"]["tar_member"]
-    if not depth_member:
-        raise RuntimeError(
-            f"Mapping JSON has no tar member for sample role '{sample_spec['sample_role']}'."
-        )
-
-    depth_raw = np.asarray(load_npy_from_tar(tf, depth_member))
+    depth_raw = np.asarray(load_npy_from_bytes(raw_depth_bytes))
     depth_meters = depth_raw.astype(np.float32) * depth_scale
 
     np.save(depth_raw_npy, depth_raw)
@@ -248,27 +271,37 @@ def main() -> None:
 
     sample_specs = choose_sample_frames(mapping, args.sample_roles)
 
-    manifests: list[dict[str, Any]] = []
-    with tarfile.open(tar_path, "r:gz") as tf:
-        scale_member = find_member_by_suffix(tf, f"/{camera}/depth.scale.npy")
-        intr_member = find_member_by_suffix(tf, f"/{camera}/depth.intrinsics.pkl")
-        depth_scale = float(np.asarray(load_npy_from_tar(tf, scale_member)).reshape(-1)[0])
-        intrinsics = load_pickle_from_tar(tf, intr_member)
+    exact_members = {
+        f"depth::{sample_spec['sample_role']}": sample_spec["nearest_depth_frame"]["tar_member"]
+        for sample_spec in sample_specs
+    }
+    suffix_members = {
+        "depth_scale": f"/{camera}/depth.scale.npy",
+        "intrinsics": f"/{camera}/depth.intrinsics.pkl",
+    }
+    raw_members = collect_required_tar_bytes(
+        tar_path,
+        exact_members=exact_members,
+        suffix_members=suffix_members,
+    )
 
-        for sample_spec in sample_specs:
-            manifests.append(
-                save_one_sample(
-                    clip_name=clip_name,
-                    mapping_path=mapping_path,
-                    mapping=mapping,
-                    clip_path=clip_path,
-                    tf=tf,
-                    camera=camera,
-                    depth_scale=depth_scale,
-                    intrinsics=intrinsics,
-                    sample_spec=sample_spec,
-                )
+    depth_scale = float(np.asarray(load_npy_from_bytes(raw_members["depth_scale"])).reshape(-1)[0])
+    intrinsics = load_pickle_from_bytes(raw_members["intrinsics"])
+
+    manifests: list[dict[str, Any]] = []
+    for sample_spec in sample_specs:
+        manifests.append(
+            save_one_sample(
+                clip_name=clip_name,
+                mapping_path=mapping_path,
+                mapping=mapping,
+                clip_path=clip_path,
+                raw_depth_bytes=raw_members[f"depth::{sample_spec['sample_role']}"],
+                depth_scale=depth_scale,
+                intrinsics=intrinsics,
+                sample_spec=sample_spec,
             )
+        )
 
     payload = {
         "mapping_json": str(mapping_path),
