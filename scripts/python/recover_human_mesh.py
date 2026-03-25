@@ -169,7 +169,7 @@ def load_hmr2_checkpoint_compat(load_hmr2_fn: Any, checkpoint_path: str, torch_m
     original_torch_load = torch_module.load
 
     def compat_torch_load(*args: Any, **kwargs: Any) -> Any:
-        kwargs.setdefault("weights_only", False)
+        kwargs["weights_only"] = False
         return original_torch_load(*args, **kwargs)
 
     torch_module.load = compat_torch_load
