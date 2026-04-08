@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from pipeline_utils import ensure_output_roots, resolve_in_outputs, save_pointcloud_preview, write_json
+from pipeline_utils import ensure_output_roots, resolve_in_outputs, write_json
 
 
 PREVIEW_RNG = np.random.default_rng(0)
@@ -221,6 +221,20 @@ def sample_points(points: np.ndarray, max_points: int) -> np.ndarray:
         return points
     indices = PREVIEW_RNG.choice(points.shape[0], size=max_points, replace=False)
     return points[indices]
+
+
+def set_equal_axis_2d(ax, xs: np.ndarray, ys: np.ndarray) -> None:
+    """Use equal scaling for one 2D preview panel."""
+    if xs.size == 0 or ys.size == 0:
+        return
+    x_min, x_max = float(xs.min()), float(xs.max())
+    y_min, y_max = float(ys.min()), float(ys.max())
+    x_mid = 0.5 * (x_min + x_max)
+    y_mid = 0.5 * (y_min + y_max)
+    radius = 0.5 * max(x_max - x_min, y_max - y_min, 1e-6)
+    ax.set_xlim(x_mid - radius, x_mid + radius)
+    ax.set_ylim(y_mid - radius, y_mid + radius)
+    ax.set_aspect("equal", adjustable="box")
 
 
 def nearest_neighbor_metrics(points: np.ndarray, target: np.ndarray) -> dict[str, float] | None:
@@ -485,7 +499,12 @@ def save_overlay_preview(
     pointcloud_subset: np.ndarray,
     out_png: Path,
 ) -> None:
-    """Save X-Z and Y-Z overlay previews of the aligned mesh and point cloud."""
+    """Save front/top/side overlay previews of the aligned mesh and point cloud.
+
+    The alignment subset is a visible-surface scan subset, not a complete human
+    body. Showing only the top-down X-Z view can make it look non-human, so the
+    front view is included first for visual sanity checking.
+    """
     import matplotlib.pyplot as plt
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
@@ -494,23 +513,69 @@ def save_overlay_preview(
     subset_sample = sample_points(pointcloud_subset, 12000)
     mesh_sample = sample_points(aligned_mesh, 8000)
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
 
-    axes[0].scatter(raw_sample[:, 0], raw_sample[:, 2], s=0.15, alpha=0.12, label="raw point cloud")
-    axes[0].scatter(subset_sample[:, 0], subset_sample[:, 2], s=0.2, alpha=0.35, label="alignment subset")
-    axes[0].scatter(mesh_sample[:, 0], mesh_sample[:, 2], s=0.2, alpha=0.6, label="aligned mesh")
+    axes[0].scatter(raw_sample[:, 0], -raw_sample[:, 1], s=0.15, alpha=0.12, label="raw human mask point cloud")
+    axes[0].scatter(subset_sample[:, 0], -subset_sample[:, 1], s=0.2, alpha=0.35, label="visible body surface subset")
+    axes[0].scatter(mesh_sample[:, 0], -mesh_sample[:, 1], s=0.2, alpha=0.6, label="aligned mesh")
     axes[0].set_xlabel("X (meters)")
-    axes[0].set_ylabel("Z (meters)")
-    axes[0].set_title("Overlay (X-Z)")
+    axes[0].set_ylabel("-Y (meters)")
+    axes[0].set_title("Front Overlay (X, -Y)")
+    set_equal_axis_2d(
+        axes[0],
+        np.concatenate([raw_sample[:, 0], subset_sample[:, 0], mesh_sample[:, 0]]),
+        np.concatenate([-raw_sample[:, 1], -subset_sample[:, 1], -mesh_sample[:, 1]]),
+    )
     axes[0].legend(markerscale=8)
 
-    axes[1].scatter(raw_sample[:, 2], raw_sample[:, 1], s=0.15, alpha=0.12, label="raw point cloud")
-    axes[1].scatter(subset_sample[:, 2], subset_sample[:, 1], s=0.2, alpha=0.35, label="alignment subset")
-    axes[1].scatter(mesh_sample[:, 2], mesh_sample[:, 1], s=0.2, alpha=0.6, label="aligned mesh")
-    axes[1].set_xlabel("Z (meters)")
-    axes[1].set_ylabel("Y (meters)")
-    axes[1].set_title("Overlay (Z-Y)")
-    axes[1].legend(markerscale=8)
+    axes[1].scatter(raw_sample[:, 0], raw_sample[:, 2], s=0.15, alpha=0.12, label="raw human mask point cloud")
+    axes[1].scatter(subset_sample[:, 0], subset_sample[:, 2], s=0.2, alpha=0.35, label="visible body surface subset")
+    axes[1].scatter(mesh_sample[:, 0], mesh_sample[:, 2], s=0.2, alpha=0.6, label="aligned mesh")
+    axes[1].set_xlabel("X (meters)")
+    axes[1].set_ylabel("Z (meters)")
+    axes[1].set_title("Top Overlay (X, Z)")
+    set_equal_axis_2d(
+        axes[1],
+        np.concatenate([raw_sample[:, 0], subset_sample[:, 0], mesh_sample[:, 0]]),
+        np.concatenate([raw_sample[:, 2], subset_sample[:, 2], mesh_sample[:, 2]]),
+    )
+
+    axes[2].scatter(raw_sample[:, 2], -raw_sample[:, 1], s=0.15, alpha=0.12, label="raw human mask point cloud")
+    axes[2].scatter(subset_sample[:, 2], -subset_sample[:, 1], s=0.2, alpha=0.35, label="visible body surface subset")
+    axes[2].scatter(mesh_sample[:, 2], -mesh_sample[:, 1], s=0.2, alpha=0.6, label="aligned mesh")
+    axes[2].set_xlabel("Z (meters)")
+    axes[2].set_ylabel("-Y (meters)")
+    axes[2].set_title("Side Overlay (Z, -Y)")
+    set_equal_axis_2d(
+        axes[2],
+        np.concatenate([raw_sample[:, 2], subset_sample[:, 2], mesh_sample[:, 2]]),
+        np.concatenate([-raw_sample[:, 1], -subset_sample[:, 1], -mesh_sample[:, 1]]),
+    )
+
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=150)
+    plt.close(fig)
+
+
+def save_alignment_subset_preview(pointcloud_subset: np.ndarray, out_png: Path) -> None:
+    """Save a front/top preview for the visible body-surface subset."""
+    import matplotlib.pyplot as plt
+
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    subset_sample = sample_points(pointcloud_subset, 20000)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
+    axes[0].scatter(subset_sample[:, 0], -subset_sample[:, 1], s=0.2)
+    axes[0].set_xlabel("X (meters)")
+    axes[0].set_ylabel("-Y (meters)")
+    axes[0].set_title("Visible Body Surface Subset - Front")
+    set_equal_axis_2d(axes[0], subset_sample[:, 0], -subset_sample[:, 1])
+
+    axes[1].scatter(subset_sample[:, 0], subset_sample[:, 2], s=0.2)
+    axes[1].set_xlabel("X (meters)")
+    axes[1].set_ylabel("Z (meters)")
+    axes[1].set_title("Visible Body Surface Subset - Top")
+    set_equal_axis_2d(axes[1], subset_sample[:, 0], subset_sample[:, 2])
 
     fig.tight_layout()
     fig.savefig(out_png, dpi=150)
@@ -596,12 +661,7 @@ def main() -> None:
     save_obj(aligned_mesh_path, aligned_vertices, mesh_faces)
     np.save(aligned_vertices_path, aligned_vertices)
     np.save(alignment_subset_path, final_subset)
-    save_pointcloud_preview(
-        final_subset,
-        alignment_subset_preview_path,
-        title="Alignment Point Cloud Subset (X-Z)",
-        empty_message="No alignment subset points",
-    )
+    save_alignment_subset_preview(final_subset, alignment_subset_preview_path)
     save_overlay_preview(aligned_vertices, pointcloud, final_subset, overlay_path)
 
     mesh_extent_before = (mesh_vertices.max(axis=0) - mesh_vertices.min(axis=0)).tolist()
@@ -633,7 +693,8 @@ def main() -> None:
         "notes": [
             "This alignment preserves the camera vertical axis and solves only for yaw, translation, and optional height-based scale.",
             "By default the mesh keeps its native human-height prior; pass --target-human-height-m when the subject's height is known.",
-            "The saved alignment point-cloud subset is a mesh-guided cleanup of the raw human point cloud and is the main signal to inspect in the overlay preview.",
+            "The saved alignment point-cloud subset is a mesh-guided visible body-surface scan, not a full human silhouette.",
+            "Use the front overlay panel to inspect human shape; the top view can look like a thin orange band for side-view depth.",
         ],
         "todo": [
             "Estimate cabinet geometry in the same depth frame and compare its top height against the aligned human height reference.",
