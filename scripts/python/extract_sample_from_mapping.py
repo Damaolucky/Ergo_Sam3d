@@ -15,7 +15,8 @@ import json
 import pickle
 import subprocess
 import tarfile
-from pathlib import Path
+import tempfile
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import numpy as np
@@ -47,6 +48,23 @@ def load_pickle_from_bytes(payload: bytes) -> Any:
     return pickle.loads(payload)
 
 
+def collect_exact_tar_bytes_with_system_tar(tar_path: Path, exact_members: dict[str, str]) -> dict[str, bytes]:
+    """Extract exact tar members with the system tar binary for speed."""
+    normalized = {alias: member.lstrip("/") for alias, member in exact_members.items()}
+    unique_members = sorted(set(normalized.values()))
+    with tempfile.TemporaryDirectory(prefix="ergo_extract_") as tmp_dir:
+        cmd = ["tar", "-xzf", str(tar_path), "-C", tmp_dir, *unique_members]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+        found: dict[str, bytes] = {}
+        for alias, member in normalized.items():
+            extracted = Path(tmp_dir) / member
+            if not extracted.exists():
+                raise FileNotFoundError(f"System tar did not extract member: {member}")
+            found[alias] = extracted.read_bytes()
+        return found
+
+
 def collect_required_tar_bytes(
     tar_path: Path,
     *,
@@ -54,6 +72,13 @@ def collect_required_tar_bytes(
     suffix_members: dict[str, str],
 ) -> dict[str, bytes]:
     """Stream a tar.gz once and collect only the required members."""
+    if not suffix_members:
+        try:
+            return collect_exact_tar_bytes_with_system_tar(tar_path, exact_members)
+        except Exception:
+            # Fall back to the pure-Python streaming path for portability.
+            pass
+
     remaining_exact = dict(exact_members)
     remaining_suffix = dict(suffix_members)
     found: dict[str, bytes] = {}
@@ -331,10 +356,14 @@ def main() -> None:
         f"depth::{sample_spec['sample_role']}": sample_spec["nearest_depth_frame"]["tar_member"]
         for sample_spec in sample_specs
     }
-    suffix_members = {
-        "depth_scale": f"/{camera}/depth.scale.npy",
-        "intrinsics": f"/{camera}/depth.intrinsics.pkl",
-    }
+    depth_member_dir = PurePosixPath(sample_specs[0]["nearest_depth_frame"]["tar_member"]).parent
+    exact_members.update(
+        {
+            "depth_scale": f"{depth_member_dir}/depth.scale.npy",
+            "intrinsics": f"{depth_member_dir}/depth.intrinsics.pkl",
+        }
+    )
+    suffix_members: dict[str, str] = {}
     raw_members = collect_required_tar_bytes(
         tar_path,
         exact_members=exact_members,
