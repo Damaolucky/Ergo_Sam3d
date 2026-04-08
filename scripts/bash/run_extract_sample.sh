@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Extract endpoint RGB/depth sample pairs from a mapping JSON.
+# Extract the final RGB/depth sample from a mapping JSON.
 
 set -euo pipefail
 
@@ -15,7 +15,7 @@ Usage:
 
 Example:
   bash scripts/bash/run_extract_sample.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.mapping.json
-  bash scripts/bash/run_extract_sample.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.mapping.json --sample-roles first last
+  bash scripts/bash/run_extract_sample.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.mapping.json --sample-roles last
 
 Environment:
   ERGO_WORK_ROOT  Default: ~/hzhou. Controls local outputs/.

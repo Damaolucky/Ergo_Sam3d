@@ -314,11 +314,14 @@ def maybe_refine_alignment(
     aligned_mesh: np.ndarray,
     pointcloud_subset: np.ndarray,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Refine alignment with a bounded partial-Chamfer objective.
+    """Refine alignment with a multi-stage bounded partial-Chamfer objective.
 
     This mirrors the scan-fitting intuition used in SMPL-Fitting: keep only the
     scan region that should match the body, then optimize a thresholded
-    bidirectional Chamfer-style objective rather than a pure PCA heuristic.
+    bidirectional Chamfer-style objective rather than a pure PCA heuristic. The
+    thresholds are tightened over stages, similar to a coarse-to-fine fitting
+    schedule. Only yaw, translation, and a small global scale correction are
+    optimized here; the mesh pose itself is not modified.
     """
     try:
         from scipy.spatial import cKDTree
@@ -327,7 +330,6 @@ def maybe_refine_alignment(
         return aligned_mesh, {"status": "skipped", "reason": "scipy_not_available"}
 
     subset_sample = sample_points(pointcloud_subset, 20000)
-    subset_tree = cKDTree(subset_sample)
     initial_metrics = {
         "mesh_to_subset": nearest_neighbor_metrics(aligned_mesh, subset_sample),
         "subset_to_mesh": nearest_neighbor_metrics(subset_sample, aligned_mesh),
@@ -335,69 +337,144 @@ def maybe_refine_alignment(
     if initial_metrics["mesh_to_subset"] is None or initial_metrics["subset_to_mesh"] is None:
         return aligned_mesh, {"status": "skipped", "reason": "metrics_unavailable"}
 
-    def objective(params: np.ndarray) -> float:
+    stages = [
+        {
+            "name": "coarse",
+            "mesh_threshold_m": 0.35,
+            "scan_threshold_m": 0.30,
+            "scan_weight": 0.55,
+            "bounds": (
+                (-np.deg2rad(35.0), np.deg2rad(35.0)),
+                (-0.25, 0.25),
+                (-0.18, 0.18),
+                (-0.25, 0.25),
+                (-0.04, 0.04),
+            ),
+            "maxiter": 90,
+        },
+        {
+            "name": "medium",
+            "mesh_threshold_m": 0.25,
+            "scan_threshold_m": 0.20,
+            "scan_weight": 0.70,
+            "bounds": (
+                (-np.deg2rad(18.0), np.deg2rad(18.0)),
+                (-0.12, 0.12),
+                (-0.10, 0.10),
+                (-0.12, 0.12),
+                (-0.015, 0.015),
+            ),
+            "maxiter": 70,
+        },
+        {
+            "name": "fine",
+            "mesh_threshold_m": 0.16,
+            "scan_threshold_m": 0.14,
+            "scan_weight": 0.85,
+            "bounds": (
+                (-np.deg2rad(8.0), np.deg2rad(8.0)),
+                (-0.06, 0.06),
+                (-0.06, 0.06),
+                (-0.06, 0.06),
+                (-0.008, 0.008),
+            ),
+            "maxiter": 60,
+        },
+    ]
+
+    current_mesh = aligned_mesh
+    accepted_any = False
+    stage_stats: list[dict[str, Any]] = []
+    cumulative_scale = 1.0
+    cumulative_translation = np.zeros(3, dtype=np.float64)
+    cumulative_yaw = 0.0
+
+    for stage in stages:
+        subset_tree = cKDTree(subset_sample)
+
+        def objective(params: np.ndarray) -> float:
+            candidate = apply_similarity_delta(
+                current_mesh,
+                yaw_radians=float(params[0]),
+                translation_xyz=np.asarray(params[1:4], dtype=np.float32),
+                log_scale=float(params[4]),
+            )
+            mesh_to_subset = subset_tree.query(candidate, k=1)[0]
+            subset_to_mesh = cKDTree(candidate).query(subset_sample, k=1)[0]
+            total_log_scale = float(np.log(cumulative_scale) + params[4])
+            scale_regularizer = 8.0 * (total_log_scale ** 2)
+            translation_regularizer = 0.03 * float(np.linalg.norm(params[1:4]))
+            return float(
+                np.minimum(mesh_to_subset, stage["mesh_threshold_m"]).mean()
+                + stage["scan_weight"] * np.minimum(subset_to_mesh, stage["scan_threshold_m"]).mean()
+                + scale_regularizer
+                + translation_regularizer
+            )
+
+        initial_params = np.zeros(5, dtype=np.float64)
+        initial_score = objective(initial_params)
+        result = minimize(
+            objective,
+            initial_params,
+            method="Powell",
+            bounds=stage["bounds"],
+            options={"maxiter": stage["maxiter"], "xtol": 5e-4, "ftol": 5e-4},
+        )
+
         candidate = apply_similarity_delta(
-            aligned_mesh,
-            yaw_radians=float(params[0]),
-            translation_xyz=np.asarray(params[1:4], dtype=np.float32),
-            log_scale=float(params[4]),
+            current_mesh,
+            yaw_radians=float(result.x[0]),
+            translation_xyz=np.asarray(result.x[1:4], dtype=np.float32),
+            log_scale=float(result.x[4]),
         )
-        mesh_to_subset = subset_tree.query(candidate, k=1)[0]
-        subset_to_mesh = cKDTree(candidate).query(subset_sample, k=1)[0]
-        return float(
-            np.minimum(mesh_to_subset, 0.25).mean()
-            + 0.7 * np.minimum(subset_to_mesh, 0.20).mean()
-            + 1.5 * (float(params[4]) ** 2)
+        final_score = float(result.fun)
+        proposed_total_scale = cumulative_scale * float(np.exp(result.x[4]))
+        accepted = bool(
+            result.success
+            and final_score < initial_score - 1e-4
+            and 0.94 <= proposed_total_scale <= 1.06
+        )
+        if accepted:
+            current_mesh = candidate
+            accepted_any = True
+            cumulative_yaw += float(result.x[0])
+            cumulative_translation += np.asarray(result.x[1:4], dtype=np.float64)
+            cumulative_scale *= float(np.exp(result.x[4]))
+
+        stage_stats.append(
+            {
+                "name": stage["name"],
+                "accepted": accepted,
+                "initial_score": float(initial_score),
+                "final_score": final_score,
+                "optimized_delta": {
+                    "yaw_degrees": float(np.degrees(result.x[0])),
+                    "translation": np.asarray(result.x[1:4], dtype=float).tolist(),
+                    "scale_multiplier": float(np.exp(result.x[4])),
+                },
+                "thresholds": {
+                    "mesh_to_scan_m": stage["mesh_threshold_m"],
+                    "scan_to_mesh_m": stage["scan_threshold_m"],
+                    "scan_weight": stage["scan_weight"],
+                },
+            }
         )
 
-    initial_params = np.zeros(5, dtype=np.float64)
-    initial_score = objective(initial_params)
-    result = minimize(
-        objective,
-        initial_params,
-        method="Powell",
-        bounds=[
-            (-np.deg2rad(30.0), np.deg2rad(30.0)),
-            (-0.20, 0.20),
-            (-0.15, 0.15),
-            (-0.20, 0.20),
-            (-0.08, 0.08),
-        ],
-        options={"maxiter": 80, "xtol": 1e-3, "ftol": 1e-3},
-    )
-
-    candidate = apply_similarity_delta(
-        aligned_mesh,
-        yaw_radians=float(result.x[0]),
-        translation_xyz=np.asarray(result.x[1:4], dtype=np.float32),
-        log_scale=float(result.x[4]),
-    )
     final_metrics = {
-        "mesh_to_subset": nearest_neighbor_metrics(candidate, subset_sample),
-        "subset_to_mesh": nearest_neighbor_metrics(subset_sample, candidate),
+        "mesh_to_subset": nearest_neighbor_metrics(current_mesh, subset_sample),
+        "subset_to_mesh": nearest_neighbor_metrics(subset_sample, current_mesh),
     }
 
-    if not result.success or result.fun >= initial_score - 1e-4:
-        return aligned_mesh, {
-            "status": "completed",
-            "accepted": False,
-            "initial_score": initial_score,
-            "final_score": float(result.fun),
-            "initial_metrics": initial_metrics,
-            "final_metrics": initial_metrics,
-        }
-
-    return candidate, {
+    return current_mesh, {
         "status": "completed",
-        "accepted": True,
-        "initial_score": initial_score,
-        "final_score": float(result.fun),
+        "accepted": accepted_any,
         "initial_metrics": initial_metrics,
         "final_metrics": final_metrics,
+        "stages": stage_stats,
         "optimized_delta": {
-            "yaw_degrees": float(np.degrees(result.x[0])),
-            "translation": np.asarray(result.x[1:4], dtype=float).tolist(),
-            "scale_multiplier": float(np.exp(result.x[4])),
+            "yaw_degrees": float(np.degrees(cumulative_yaw)),
+            "translation": cumulative_translation.tolist(),
+            "scale_multiplier": cumulative_scale,
         },
     }
 

@@ -88,11 +88,13 @@ Current behavior:
 - preserves the camera vertical axis and solves only for yaw
 - keeps the mesh's native human-height prior by default
 - accepts `--target-human-height-m` when a known subject height is available
+- refines yaw, translation, and small global scale with a multi-stage bounded partial-Chamfer objective inspired by SMPL-Fitting
 - saves `aligned_mesh.obj`
 - saves `aligned_mesh_vertices.npy`
+- saves `alignment_pointcloud_subset.npy`
 - saves `mesh_pointcloud_overlay_preview.png`
 - saves `alignment_stats.json`
 
 Current limitation:
 
-- this is a baseline initialization only, not a final alignment method
+- this is a partial scan fitting method; it does not deform the SMPL pose or body shape

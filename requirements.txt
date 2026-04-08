@@ -6,3 +6,4 @@ ultralytics
 huggingface_hub
 
 # ffmpeg must be installed separately and available on PATH.
+# Optional: open3d can denoise shelf/object height candidates when installed.

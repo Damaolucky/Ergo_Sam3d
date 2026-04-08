@@ -5,12 +5,13 @@
 The pipeline converts one annotated lift clip into:
 
 - a verified RGB/depth frame mapping,
-- endpoint RGB/depth samples for the first and last clip frames,
+- a final-frame RGB/depth sample for the destination shelf/object position,
 - a scene point cloud,
 - a human mask and human-only point cloud,
 - a coarse PCA-based human geometry summary,
 - a recovered human mesh and joints,
-- a height-prior mesh-to-pointcloud alignment.
+- a height-prior mesh-to-pointcloud alignment,
+- a final-frame shelf/object height estimate.
 
 ## Verified Run Order
 
@@ -30,24 +31,19 @@ CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
 bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
 
-FIRST_SAMPLE="${CLIP}__first_high_24"
 LAST_SAMPLE="${CLIP}__last_high_24"
 
-bash scripts/bash/run_prepare_geometry.sh "${FIRST_SAMPLE}.sample_manifest.json"
 bash scripts/bash/run_prepare_geometry.sh "${LAST_SAMPLE}.sample_manifest.json"
-bash scripts/bash/run_human_mask.sh "$FIRST_SAMPLE"
 bash scripts/bash/run_human_mask.sh "$LAST_SAMPLE"
-bash scripts/bash/run_analyze_human_geometry.sh "$FIRST_SAMPLE"
 bash scripts/bash/run_analyze_human_geometry.sh "$LAST_SAMPLE"
 
 # New next-stage setup and execution
 bash scripts/bash/setup_hmr2.sh
-bash scripts/bash/run_human_mesh_recovery.sh "$FIRST_SAMPLE"
 bash scripts/bash/run_human_mesh_recovery.sh "$LAST_SAMPLE"
-bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE"
 bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE"
-bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE" --target-human-height-m 1.72
+bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE"
 bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE" --target-human-height-m 1.72
+bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE" --known-human-height-m 1.72
 ```
 
 ## Stage Details
@@ -85,11 +81,11 @@ Entry points:
 
 Behavior:
 
-- extracts the first and last RGB frames from the clip video with `ffmpeg`
-- extracts the nearest depth frame for each endpoint from the tarball
+- extracts the final RGB frame from the clip video with `ffmpeg`
+- extracts the nearest final-frame depth frame from the tarball
 - extracts `depth.scale.npy`
 - extracts `depth.intrinsics.pkl`
-- saves RGB, raw depth, metric depth, depth visualization, and one sample manifest per endpoint
+- saves RGB, raw depth, metric depth, depth visualization, and one final-frame sample manifest
 
 ### 3. Geometry sample preparation
 
@@ -195,12 +191,13 @@ Behavior:
 - uses the mesh's native human-height prior by default
 - optionally accepts `--target-human-height-m` for explicit scale calibration
 - uses torso-centered X/Z anchors and a lower-body Y anchor
+- refines yaw/translation/scale with a multi-stage bounded partial-Chamfer objective inspired by SMPL-Fitting
 - writes an aligned mesh and an overlay preview
 
 Current state:
 
 - verified on the example clip
-- intended as a baseline for later refinement and cabinet-height reasoning
+- intended as the current partial scan-fitting method for cabinet-height reasoning
 
 Expected outputs:
 
@@ -210,3 +207,23 @@ Expected outputs:
 - `alignment_pointcloud_subset_preview.png`
 - `mesh_pointcloud_overlay_preview.png`
 - `alignment_stats.json`
+
+### 8. Shelf/object height estimation
+
+Entry points:
+
+- `scripts/bash/run_estimate_shelf_height.sh`
+- `scripts/python/estimate_shelf_height.py`
+
+Behavior:
+
+- uses the final-frame sample folder, because the final frame corresponds to `height2`
+- uses the aligned human mesh feet as the floor reference when available
+- searches the shelf-side depth ROI for the target level (`high`, `mid`, or `low`)
+- computes height as `floor_y - target_y` because camera `Y` points down
+- writes a JSON estimate and an RGB overlay preview for inspection
+
+Expected outputs:
+
+- `shelf_height_estimate.json`
+- `shelf_height_preview.png`

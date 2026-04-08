@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Extract endpoint RGB/depth samples from a mapping JSON."""
+"""Extract last-frame RGB/depth samples from a mapping JSON.
+
+The mapping file still records first/mid/last frame references for traceability,
+but the default production workflow now keeps only the final clip frame because
+the final frame corresponds to the destination shelf position, such as `low` in
+a `mid -> low` clip.
+"""
 
 from __future__ import annotations
 
@@ -250,9 +256,9 @@ def save_one_sample(
 
 
 def main() -> None:
-    """Parse arguments and extract endpoint sample assets for one mapped clip."""
+    """Parse arguments and extract sample assets for one mapped clip."""
     parser = argparse.ArgumentParser(
-        description="Extract first/last RGB+depth samples from a mapping JSON."
+        description="Extract the final RGB+depth sample from a mapping JSON."
     )
     parser.add_argument(
         "mapping",
@@ -264,9 +270,9 @@ def main() -> None:
     parser.add_argument(
         "--sample-roles",
         nargs="+",
-        default=["first", "last"],
+        default=["last"],
         choices=["first", "last", "mid"],
-        help="Which sample roles to extract. Default: first last",
+        help="Which sample roles to extract. Default: last",
     )
     args = parser.parse_args()
 

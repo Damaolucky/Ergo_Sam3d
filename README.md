@@ -3,12 +3,13 @@
 This repository preserves a verified Linux pipeline for:
 
 1. mapping a human motion clip to RGB/depth frames,
-2. extracting endpoint RGB/depth samples for the first and last clip frames,
+2. extracting the final-frame RGB/depth sample for the destination shelf position,
 3. building a scene point cloud,
 4. generating a human mask and human-only point cloud,
 5. running basic PCA-based human geometry analysis,
 6. preparing a modern HMR2-based human mesh recovery stage,
-7. preparing a height-prior mesh-to-pointcloud alignment stage.
+7. running a height-prior mesh-to-pointcloud alignment stage,
+8. estimating the corresponding shelf/object height in the same depth frame.
 
 The outputs are intended to support later mesh-depth alignment and quantitative geometry evaluation.
 
@@ -23,11 +24,12 @@ Verified stages:
 - PCA-based human geometry analysis
 - HMR2 / 4D-Humans mesh recovery on the verified example clip
 - height-prior mesh-to-pointcloud alignment on the verified example clip
+- final-frame shelf/object height estimation on the verified example clip
 
 Current caveats:
 
 - HMR2 still requires the official SMPL neutral model file
-- mesh alignment is still a baseline, not final registration
+- mesh alignment is a partial scan registration, not a full SMPL pose-fitting optimization
 
 ## Data Assumptions
 
@@ -72,6 +74,7 @@ repo_root/
       setup_hmr2.sh
       run_human_mesh_recovery.sh
       run_align_mesh.sh
+      run_estimate_shelf_height.sh
     python/
       pipeline_utils.py
       map_clip_to_frames_from_tar.py
@@ -81,6 +84,7 @@ repo_root/
       analyze_human_geometry.py
       recover_human_mesh.py
       align_mesh_to_pointcloud.py
+      estimate_shelf_height.py
 ```
 
 ## Environment Setup
@@ -108,6 +112,10 @@ Required tools and packages:
 - `ultralytics`
 - `huggingface_hub`
 - `ffmpeg` on `PATH`
+
+Optional:
+
+- `open3d` for denoising shelf/object height candidates; the estimator falls back to NumPy if it is not installed
 
 Notes:
 
@@ -154,28 +162,23 @@ CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
 bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
 
-FIRST_SAMPLE="${CLIP}__first_high_24"
 LAST_SAMPLE="${CLIP}__last_high_24"
 
-bash scripts/bash/run_prepare_geometry.sh "${FIRST_SAMPLE}.sample_manifest.json"
 bash scripts/bash/run_prepare_geometry.sh "${LAST_SAMPLE}.sample_manifest.json"
-bash scripts/bash/run_human_mask.sh "$FIRST_SAMPLE"
 bash scripts/bash/run_human_mask.sh "$LAST_SAMPLE"
-bash scripts/bash/run_analyze_human_geometry.sh "$FIRST_SAMPLE"
 bash scripts/bash/run_analyze_human_geometry.sh "$LAST_SAMPLE"
 
 # Optional next-stage setup
 bash scripts/bash/setup_hmr2.sh
 
 # New next-stage steps
-bash scripts/bash/run_human_mesh_recovery.sh "$FIRST_SAMPLE"
 bash scripts/bash/run_human_mesh_recovery.sh "$LAST_SAMPLE"
-bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE"
 bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE"
+bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE"
 
 # Optional: if the subject's real height is known, use it directly for scale calibration
-bash scripts/bash/run_align_mesh.sh "$FIRST_SAMPLE" --target-human-height-m 1.72
 bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE" --target-human-height-m 1.72
+bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE" --known-human-height-m 1.72
 ```
 
 Outputs are written under `${ERGO_WORK_ROOT:-~/hzhou}/outputs/`.
@@ -183,11 +186,12 @@ Outputs are written under `${ERGO_WORK_ROOT:-~/hzhou}/outputs/`.
 Important behavior:
 
 - Step 1 creates `<clip>.mapping.json`
-- Step 2 creates first/last endpoint sample files such as `<clip>__first_high_24.*` and `<clip>__last_high_24.*`
-- Step 3 moves each endpoint sample into its own folder under `outputs/<clip>__<role>_<position>/`
-- Steps 4 and 5 operate on each endpoint folder independently
-- Step 6 writes mesh recovery artifacts into each endpoint folder
-- Step 7 writes height-prior alignment artifacts into each endpoint folder
+- Step 2 now creates only the final endpoint sample by default, such as `<clip>__last_high_24.*`
+- Step 3 moves that final endpoint sample into its own folder under `outputs/<clip>__last_<position>/`
+- Steps 4 and 5 operate on the final endpoint folder
+- Step 6 writes mesh recovery artifacts into that endpoint folder
+- Step 7 writes height-prior alignment artifacts into that endpoint folder
+- Step 8 writes shelf/object height estimates into that endpoint folder
 
 ## Step Outputs
 
@@ -227,6 +231,17 @@ Important behavior:
 - yaw-only transform from recovered mesh space to human point-cloud space
 - optional height calibration, lower-body anchoring, overlap metrics, and the mesh-guided alignment subset stats used for later cabinet-height estimation
 
+`shelf_height_estimate.json`
+
+- final-frame shelf/object height estimate in meters
+- floor reference used for `height = floor_y - target_y`
+- destination position label parsed from the clip metadata, such as `high_24`
+- ratio between the estimated shelf/object height and aligned human height
+
+`shelf_height_preview.png`
+
+- RGB overlay showing the shelf-side target region and the pixels used for the automatic height estimate
+
 ## Verified Example Notes
 
 Verified mapping output for the example clip includes:
@@ -241,7 +256,6 @@ Verified mapping output for the example clip includes:
 
 For this clip, the new endpoint sample folders are named:
 
-- `2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4__first_high_24`
 - `2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4__last_high_24`
 
 Verified geometry example:
@@ -273,10 +287,17 @@ Verified mesh recovery example:
 
 Verified height-prior alignment example:
 
-- aligned mesh extent: approximately `[1.027, 1.658, 0.722]` with native mesh height prior
-- `mesh_native_height_m`: approximately `1.55`
-- `observed_pointcloud_height_raw_m`: approximately `2.23`
-- the new alignment intentionally avoids scaling the mesh to match contaminated point-cloud depth thickness
+- estimated human height: approximately `1.60 m`
+- refined scale multiplier: approximately `0.99`
+- alignment-subset-to-mesh mean distance: approximately `0.047 m`
+- alignment-subset-to-mesh p95 distance: approximately `0.131 m`
+- the alignment intentionally avoids scaling the mesh to match contaminated point-cloud depth thickness
+
+Verified shelf/object height example for `last_high_24`:
+
+- estimated `high` target height: approximately `2.15 m`
+- automatic uncertainty band: approximately `[2.12, 2.19] m`
+- shelf-to-human height ratio: approximately `1.35`
 
 ## Known Limitations
 
@@ -285,7 +306,7 @@ Verified height-prior alignment example:
 - Human point clouds can still contain background contamination.
 - The current yaw estimate is only a coarse PCA-based orientation, not a reliable human facing direction.
 - HMR2 mesh recovery still requires the official SMPL neutral model file even though the checkpoint download itself is automatic.
-- The current mesh alignment stage is yaw-only and height-prior; it is more stable than full 3D PCA, but it is still not a final registration method.
+- The current mesh alignment stage is yaw-only and height-prior with multi-stage partial-Chamfer refinement; it is more stable than full 3D PCA, but it does not deform the SMPL pose/body shape.
 
 See [docs/workflow.md](docs/workflow.md), [docs/data_layout.md](docs/data_layout.md), [docs/known_issues.md](docs/known_issues.md), and [docs/mesh_recovery.md](docs/mesh_recovery.md) for more detail.
 
@@ -293,5 +314,5 @@ See [docs/workflow.md](docs/workflow.md), [docs/data_layout.md](docs/data_layout
 
 - clean the human point cloud before geometry estimation
 - estimate cabinet geometry in the same depth frame and compare its top height against the aligned human height reference
-- refine mesh-to-pointcloud alignment beyond the current height-prior baseline
+- refine mesh-to-pointcloud alignment with explicit SMPL pose/shape fitting if needed
 - evaluate orientation, scale, and position more robustly

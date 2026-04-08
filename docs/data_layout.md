@@ -32,12 +32,6 @@ Before geometry preparation:
 ```text
 ~/hzhou/outputs/
   <clip>.mapping.json
-  <clip>__first_<position>.rgb.png
-  <clip>__first_<position>.depth_raw.npy
-  <clip>__first_<position>.depth_meters.npy
-  <clip>__first_<position>.depth_vis.png
-  <clip>__first_<position>.intrinsics.pkl
-  <clip>__first_<position>.sample_manifest.json
   <clip>__last_<position>.rgb.png
   <clip>__last_<position>.depth_raw.npy
   <clip>__last_<position>.depth_meters.npy
@@ -49,21 +43,23 @@ Before geometry preparation:
 After geometry preparation:
 
 ```text
-~/hzhou/outputs/<clip>__<role>_<position>/
+~/hzhou/outputs/<clip>__last_<position>/
   <clip>.mapping.json
-  <clip>__<role>_<position>.rgb.png
-  <clip>__<role>_<position>.depth_raw.npy
-  <clip>__<role>_<position>.depth_meters.npy
-  <clip>__<role>_<position>.depth_vis.png
-  <clip>__<role>_<position>.intrinsics.pkl
-  <clip>__<role>_<position>.sample_manifest.json
+  <clip>__last_<position>.rgb.png
+  <clip>__last_<position>.depth_raw.npy
+  <clip>__last_<position>.depth_meters.npy
+  <clip>__last_<position>.depth_vis.png
+  <clip>__last_<position>.intrinsics.pkl
+  <clip>__last_<position>.sample_manifest.json
   pointcloud.npy
+  pointcloud_rgb.ply
   pointcloud_preview.png
   geometry_stats.json
   human_mask.png
   human_mask.npy
   masked_depth_meters.npy
   human_pointcloud.npy
+  human_pointcloud_rgb.ply
   human_pointcloud_preview.png
   mask_stats.json
   human_geometry.json
@@ -80,6 +76,8 @@ After geometry preparation:
   alignment_pointcloud_subset_preview.png
   mesh_pointcloud_overlay_preview.png
   alignment_stats.json
+  shelf_height_estimate.json
+  shelf_height_preview.png
 ```
 
 ## Environment Variable Overrides

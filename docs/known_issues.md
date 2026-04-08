@@ -20,6 +20,10 @@ The current human mask is good enough to produce a first-pass human point cloud,
 
 The selected mesh recovery stage uses 4D-Humans / HMR2. Its model checkpoints download automatically, but the official SMPL neutral model file is still required before mesh recovery can run end-to-end.
 
-## Mesh alignment is only a coarse initialization
+## Mesh alignment is still a partial registration
 
-`align_mesh_to_pointcloud.py` currently uses a yaw-only, height-prior alignment. This is more stable than the older full-3D PCA transform, but it is still only an initialization and not a final registration method.
+`align_mesh_to_pointcloud.py` uses a yaw-only, height-prior initialization followed by multi-stage partial-Chamfer refinement. This is more stable than the older full-3D PCA transform, but single-view depth still observes only the visible body surface while the mesh is a full body, so exact full-mesh overlap is not expected.
+
+## Shelf/object height estimation is automatic ROI geometry
+
+`estimate_shelf_height.py` estimates the target shelf/object height from the final-frame depth ROI and uses the aligned human mesh feet as the floor reference. The result should be checked with `shelf_height_preview.png`, especially for clips where the shelf is occluded, the object is not yet at the destination, or the target side is not the default right side.
