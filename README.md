@@ -242,6 +242,15 @@ Important behavior:
 
 - RGB overlay showing the shelf-side target region and the pixels used for the automatic height estimate
 
+`shelf_height_report.png`
+
+- combined RGB overlay and height histogram
+- easiest file to inspect when checking whether the shelf/object height estimate is plausible
+
+`shelf_height_summary.txt`
+
+- short text readout of the final height, uncertainty band, human-height ratio, and method
+
 ## Verified Example Notes
 
 Verified mapping output for the example clip includes:

@@ -78,6 +78,8 @@ After geometry preparation:
   alignment_stats.json
   shelf_height_estimate.json
   shelf_height_preview.png
+  shelf_height_report.png
+  shelf_height_summary.txt
 ```
 
 ## Environment Variable Overrides

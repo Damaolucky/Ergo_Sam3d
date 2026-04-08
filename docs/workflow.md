@@ -221,9 +221,11 @@ Behavior:
 - uses the aligned human mesh feet as the floor reference when available
 - searches the shelf-side depth ROI for the target level (`high`, `mid`, or `low`)
 - computes height as `floor_y - target_y` because camera `Y` points down
-- writes a JSON estimate and an RGB overlay preview for inspection
+- writes a JSON estimate, a text summary, an RGB overlay preview, and a histogram report for inspection
 
 Expected outputs:
 
 - `shelf_height_estimate.json`
 - `shelf_height_preview.png`
+- `shelf_height_report.png`
+- `shelf_height_summary.txt`

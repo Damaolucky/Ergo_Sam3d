@@ -310,6 +310,121 @@ def save_height_preview(
     plt.close(fig)
 
 
+def save_height_report(
+    *,
+    rgb: np.ndarray,
+    candidate_uv: np.ndarray,
+    selected_uv: np.ndarray,
+    filtered_heights: np.ndarray,
+    v_range: tuple[int, int],
+    side: str,
+    target_height_m: float,
+    uncertainty_band_m: tuple[float, float],
+    height_selection_stats: dict[str, Any],
+    human_height_m: float | None,
+    height_ratio: float | None,
+    calibrated_height_m: float | None,
+    out_path: Path,
+) -> None:
+    """Save a combined visual report for manual shelf-height inspection."""
+    import matplotlib.pyplot as plt
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+
+    axes[0].imshow(rgb)
+    axes[0].axhspan(v_range[0], v_range[1], color="yellow", alpha=0.12, label="target level band")
+    if candidate_uv.size:
+        candidate_sample = candidate_uv
+        if candidate_sample.shape[0] > 3500:
+            idx = np.random.default_rng(0).choice(candidate_sample.shape[0], 3500, replace=False)
+            candidate_sample = candidate_sample[idx]
+        axes[0].scatter(candidate_sample[:, 0], candidate_sample[:, 1], s=1, c="cyan", alpha=0.12, label="candidates")
+    if selected_uv.size:
+        selected_sample = selected_uv
+        if selected_sample.shape[0] > 2500:
+            idx = np.random.default_rng(1).choice(selected_sample.shape[0], 2500, replace=False)
+            selected_sample = selected_sample[idx]
+        axes[0].scatter(selected_sample[:, 0], selected_sample[:, 1], s=2, c="red", alpha=0.35, label="selected height band")
+    axes[0].set_title(f"Final-frame target ROI ({side} side)")
+    axes[0].set_xlim(0, rgb.shape[1])
+    axes[0].set_ylim(rgb.shape[0], 0)
+    axes[0].axis("off")
+    axes[0].legend(loc="lower left")
+
+    axes[1].hist(filtered_heights, bins=80, color="#8fa7b3", alpha=0.8, label="candidate heights")
+    axes[1].axvspan(
+        uncertainty_band_m[0],
+        uncertainty_band_m[1],
+        color="red",
+        alpha=0.16,
+        label="selected uncertainty band",
+    )
+    axes[1].axvline(target_height_m, color="red", linewidth=2.0, label="selected height")
+    fallback_height = height_selection_stats.get("fallback_height_m")
+    if fallback_height is not None:
+        axes[1].axvline(
+            float(fallback_height),
+            color="black",
+            linestyle="--",
+            linewidth=1.2,
+            label="fallback percentile",
+        )
+    axes[1].set_xlabel("height above floor (meters)")
+    axes[1].set_ylabel("candidate count")
+    axes[1].set_title("Depth ROI height distribution")
+    axes[1].legend(loc="upper right")
+
+    lines = [
+        f"estimated shelf/object height: {target_height_m:.3f} m",
+        f"uncertainty band: [{uncertainty_band_m[0]:.3f}, {uncertainty_band_m[1]:.3f}] m",
+    ]
+    if human_height_m is not None:
+        lines.append(f"estimated human height: {human_height_m:.3f} m")
+    if height_ratio is not None:
+        lines.append(f"shelf / human ratio: {height_ratio:.3f}")
+    if calibrated_height_m is not None:
+        lines.append(f"known-height calibrated shelf height: {calibrated_height_m:.3f} m")
+    lines.append(f"selection method: {height_selection_stats.get('method', 'unknown')}")
+    axes[1].text(
+        0.02,
+        0.98,
+        "\n".join(lines),
+        transform=axes[1].transAxes,
+        va="top",
+        ha="left",
+        bbox={"facecolor": "white", "alpha": 0.82, "edgecolor": "none"},
+    )
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def write_height_summary(path: Path, payload: dict[str, Any]) -> None:
+    """Write a concise text summary of the shelf-height estimate."""
+    calibrated = payload.get("known_human_height_calibrated_shelf_height_m")
+    lines = [
+        "Shelf/object height estimate",
+        f"clip_dir: {payload['clip_dir']}",
+        f"position_label: {payload.get('position_label')}",
+        f"target_level: {payload.get('target_level')}",
+        f"shelf_side: {payload.get('shelf_side')}",
+        f"estimated_shelf_height_m: {payload['estimated_shelf_height_m']:.4f}",
+        (
+            "estimated_shelf_height_uncertainty_band_m: "
+            f"[{payload['estimated_shelf_height_uncertainty_band_m'][0]:.4f}, "
+            f"{payload['estimated_shelf_height_uncertainty_band_m'][1]:.4f}]"
+        ),
+        f"estimated_human_height_m: {payload.get('estimated_human_height_m')}",
+        f"shelf_to_human_height_ratio: {payload.get('shelf_to_human_height_ratio')}",
+        f"known_human_height_calibrated_shelf_height_m: {calibrated}",
+        f"method: {payload.get('method')}",
+        "view: shelf_height_report.png and shelf_height_preview.png",
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main() -> None:
     """Estimate the final-frame target shelf/object height."""
     parser = argparse.ArgumentParser(
@@ -437,7 +552,9 @@ def main() -> None:
     )
 
     preview_path = clip_dir / "shelf_height_preview.png"
+    report_path = clip_dir / "shelf_height_report.png"
     stats_path = clip_dir / "shelf_height_estimate.json"
+    summary_path = clip_dir / "shelf_height_summary.txt"
     save_height_preview(
         rgb=rgb,
         candidate_uv=candidate_uv,
@@ -445,6 +562,21 @@ def main() -> None:
         v_range=v_range,
         side=side,
         out_path=preview_path,
+    )
+    save_height_report(
+        rgb=rgb,
+        candidate_uv=candidate_uv,
+        selected_uv=candidate_uv[selected],
+        filtered_heights=filtered_heights,
+        v_range=v_range,
+        side=side,
+        target_height_m=target_height_m,
+        uncertainty_band_m=(float(uncertainty_low), float(uncertainty_high)),
+        height_selection_stats=height_selection_stats,
+        human_height_m=human_height_m,
+        height_ratio=height_ratio,
+        calibrated_height_m=calibrated_height,
+        out_path=report_path,
     )
 
     payload = {
@@ -487,6 +619,8 @@ def main() -> None:
         },
         "outputs": {
             "shelf_height_preview_png": str(preview_path),
+            "shelf_height_report_png": str(report_path),
+            "shelf_height_summary_txt": str(summary_path),
             "shelf_height_estimate_json": str(stats_path),
         },
         "notes": [
@@ -496,6 +630,7 @@ def main() -> None:
         ],
     }
     write_json(stats_path, payload)
+    write_height_summary(summary_path, payload)
     print(json.dumps(payload, indent=2))
 
 
