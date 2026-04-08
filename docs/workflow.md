@@ -10,7 +10,7 @@ The pipeline converts one annotated lift clip into:
 - a human mask and human-only point cloud,
 - a recovered human mesh and joints,
 - a height-prior mesh-to-pointcloud alignment,
-- a keyframe shelf/object height estimate.
+- a keyframe hand-anchored target-height estimate.
 
 ## Verified Run Order
 
@@ -204,8 +204,10 @@ Behavior:
 
 - uses the prepared keyframe sample folder: first frame for `lift`, last frame for `put`
 - uses the aligned human mesh feet as the floor reference when available
-- searches the shelf-side depth ROI for the target level (`high`, `mid`, or `low`)
+- detects the target-side hand anchor from the human-mask silhouette
+- samples a local depth patch just inside that hand extremity
 - computes height as `floor_y - target_y` because camera `Y` points down
+- falls back to a simple shelf-side ROI estimate if the local hand depth is unavailable
 - writes a JSON estimate, a text summary, an RGB overlay preview, and a histogram report for inspection
 
 Expected outputs:

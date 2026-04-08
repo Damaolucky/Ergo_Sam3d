@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Estimate the shelf/object height for one prepared keyframe clip output folder.
+# Estimate the hand-anchored target height for one prepared keyframe clip output folder.
 
 set -euo pipefail
 
@@ -22,6 +22,7 @@ Notes:
   *_lift.mp4 samples should normally be first-frame folders.
   *_put.mp4 samples should normally be last-frame folders.
   The estimate uses aligned_mesh_vertices.npy as the floor/human reference when available.
+  The primary estimate is the final hand height in the keyframe, with a simpler ROI method only as fallback.
 EOF
 }
 

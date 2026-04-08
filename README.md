@@ -8,7 +8,7 @@ This repository preserves a verified Linux pipeline for:
 4. generating a human mask and human-only point cloud,
 5. running a modern HMR2-based human mesh recovery stage,
 6. running a height-prior mesh-to-pointcloud alignment stage,
-7. estimating the corresponding shelf/object height in the same depth frame.
+7. estimating the corresponding target height from the final hand position in the same depth frame.
 
 The outputs are intended to support later mesh-depth alignment and quantitative geometry evaluation.
 
@@ -22,7 +22,7 @@ Verified stages:
 - YOLO-based human mask generation
 - HMR2 / 4D-Humans mesh recovery on the verified example clip
 - height-prior mesh-to-pointcloud alignment on the verified example clip
-- keyframe shelf/object height estimation on the verified example clip
+- keyframe hand-anchored target-height estimation on the verified example clip
 
 Current caveats:
 
@@ -137,15 +137,12 @@ Required tools and packages:
 - `huggingface_hub`
 - `ffmpeg` on `PATH`
 
-Optional:
-
-- `open3d` for denoising shelf/object height candidates; the estimator falls back to NumPy if it is not installed
-
 Notes:
 
 - `ffmpeg` is required by `extract_sample_from_mapping.py`
 - `yolov8n-seg.pt` should not be committed; Ultralytics can download it when needed
 - the mesh recovery stage is designed around an external HMR2 / 4D-Humans install
+- no `color_intrinsic` or color-depth extrinsic calibration file is currently available in the dataset layout, so RGB human masks are resized into depth space approximately rather than geometrically reprojected
 
 ## HMR2 Mesh Recovery Setup
 
@@ -201,7 +198,7 @@ Important behavior:
 - Step 4 writes human mask and human point-cloud artifacts into that endpoint folder
 - Step 5 writes mesh recovery artifacts into that endpoint folder
 - Step 6 writes height-prior alignment artifacts into that endpoint folder
-- Step 7 writes shelf/object height estimates into that endpoint folder
+- Step 7 writes hand-anchored target-height estimates into that endpoint folder
 
 ## Step Outputs
 
@@ -238,23 +235,24 @@ Important behavior:
 
 `shelf_height_estimate.json`
 
-- keyframe shelf/object height estimate in meters
+- keyframe target height estimate in meters
+- primary value is the final hand height in the selected keyframe
 - floor reference used for `height = floor_y - target_y`
 - source or destination position label parsed from the clip metadata, such as `high_24`
-- ratio between the estimated shelf/object height and aligned human height
+- ratio between the estimated target height and aligned human height
 
 `shelf_height_preview.png`
 
-- RGB overlay showing the shelf-side target region and the pixels used for the automatic height estimate
+- RGB overlay showing the detected hand anchor, its local depth patch, and the pixels used for the final estimate
 
 `shelf_height_report.png`
 
-- combined RGB overlay and height histogram
-- easiest file to inspect when checking whether the shelf/object height estimate is plausible
+- combined RGB overlay and local hand-patch height histogram
+- easiest file to inspect when checking whether the hand-anchored target-height estimate is plausible
 
 `shelf_height_summary.txt`
 
-- short text readout of the final height, uncertainty band, human-height ratio, and method
+- short text readout of the final hand-anchored target height, uncertainty band, human-height ratio, and method
 
 ## Verified Example Notes
 
@@ -300,19 +298,21 @@ Verified height-prior alignment example:
 - alignment-subset-to-mesh p95 distance: approximately `0.131 m`
 - the alignment intentionally avoids scaling the mesh to match contaminated point-cloud depth thickness
 
-Verified shelf/object height example:
+Verified hand-anchored target-height example:
 
-- estimated `high` target height: approximately `2.15 m`
-- automatic uncertainty band: approximately `[2.12, 2.19] m`
-- shelf-to-human height ratio: approximately `1.35`
+- the current estimator locks onto the operator's final hand position in the action-aware keyframe
+- results are stored per clip in `shelf_height_estimate.json`, `shelf_height_preview.png`, and `shelf_height_report.png`
+- unlike the older wide ROI method, this number is a hand-anchored proxy for the source/destination height, not a direct cabinet-surface reconstruction
 
 ## Known Limitations
 
 - Timestamps in the session tarballs are absolute millisecond timestamps and must be converted to relative seconds by subtracting the first frame time.
 - YOLO segmentation masks may be produced at a lower resolution than the depth frame and must be resized with nearest-neighbor before masking depth.
+- No `color_intrinsic` or color-depth extrinsic calibration file is currently available, so RGB masks cannot yet be rigorously reprojected into the depth camera frame.
 - Human point clouds can still contain background contamination.
 - HMR2 mesh recovery still requires the official SMPL neutral model file even though the checkpoint download itself is automatic.
 - The current mesh alignment stage is yaw-only and height-prior with multi-stage partial-Chamfer refinement; it is more stable than full 3D PCA, but it does not deform the SMPL pose/body shape.
+- The current target-height stage measures the final hand height in the keyframe and uses it as a proxy for the source/destination shelf height. It is not yet an explicit cabinet-surface detector.
 
 See [docs/workflow.md](docs/workflow.md), [docs/data_layout.md](docs/data_layout.md), [docs/known_issues.md](docs/known_issues.md), and [docs/mesh_recovery.md](docs/mesh_recovery.md) for more detail.
 

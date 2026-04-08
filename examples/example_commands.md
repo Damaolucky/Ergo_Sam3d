@@ -30,4 +30,4 @@ Current next-stage status:
 
 - HMR2 mesh recovery verified on the example clip once the official SMPL neutral model is available
 - alignment stage verified as a height-prior, partial-Chamfer fitting method on the example clip
-- shelf/object height estimation runs on the action-aware keyframe sample, e.g. `first_high_24` for this `lift` example
+- target-height estimation runs on the action-aware keyframe sample and now uses the final hand position in that keyframe as the primary anchor

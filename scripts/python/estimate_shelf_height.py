@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Estimate a shelf/object height from the prepared keyframe sample.
+"""Estimate a hand-anchored target height from the prepared keyframe sample.
 
 The prepared keyframe is action-aware: `*_lift.mp4` clips use the first frame at
 the source shelf/object position, while `*_put.mp4` clips use the last frame at
-the destination shelf/object position. In the camera frame used by the depth
-backprojection, `Y` points downward, so a vertical height above the floor is
-computed as:
+the destination position. The current height estimate is intentionally tied to
+the operator's final hand position in that keyframe, because the hand is the
+most direct cue for where the object is being picked from or placed to.
+
+The depth camera frame uses `Y` pointing downward, so a vertical height above
+the floor is computed as:
 
     height_m = floor_y_m - target_y_m
 
 The floor reference is taken from the aligned human mesh feet when available.
-The target shelf/object height is estimated from a shelf-side region of the
-prepared RGB/depth keyframe and stored with an uncertainty band for manual
-review.
+The primary method detects the target-side hand silhouette extremity in the
+human mask, samples a local depth patch just inside that extremity, and reports
+the resulting hand height. A simpler shelf-side ROI estimate remains as a
+fallback when the local hand depth is missing.
 """
 
 from __future__ import annotations
@@ -37,13 +41,26 @@ from pipeline_utils import (
 )
 
 
-LEVEL_CONFIGS = {
-    # Fractions of image height, plus the default height percentile to use.
-    # Smaller image v / camera Y means physically higher in the scene.
-    "high": {"v_fraction": (0.10, 0.36), "height_percentile": 85.0},
-    "mid": {"v_fraction": (0.30, 0.62), "height_percentile": 55.0},
-    "low": {"v_fraction": (0.52, 0.92), "height_percentile": 25.0},
+LEVEL_CONFIGS: dict[str, dict[str, Any]] = {
+    "high": {
+        "bbox_hand_v_fraction": (0.15, 0.65),
+        "roi_v_fraction": (0.10, 0.36),
+        "fallback_percentile": 85.0,
+    },
+    "mid": {
+        "bbox_hand_v_fraction": (0.20, 0.82),
+        "roi_v_fraction": (0.30, 0.62),
+        "fallback_percentile": 55.0,
+    },
+    "low": {
+        "bbox_hand_v_fraction": (0.35, 0.98),
+        "roi_v_fraction": (0.52, 0.92),
+        "fallback_percentile": 25.0,
+    },
 }
+
+
+PREVIEW_RNG = np.random.default_rng(0)
 
 
 def resolve_clip_dir(clip_arg: str) -> Path:
@@ -75,7 +92,7 @@ def load_sample_metadata(clip_dir: Path) -> dict[str, Any]:
 
 
 def infer_level(position_label: str | None, explicit_level: str | None) -> str:
-    """Infer the shelf level from metadata unless the caller overrides it."""
+    """Infer the target level from metadata unless the caller overrides it."""
     if explicit_level:
         return explicit_level
     label = (position_label or "").lower()
@@ -100,7 +117,7 @@ def side_mask_for_frame(
     side: str,
     margin_pixels: int,
 ) -> np.ndarray:
-    """Build a horizontal image-side mask for the target shelf/object region."""
+    """Build a simple left/right search band outside the human bbox."""
     columns = np.arange(width)[None, :]
     if human_box is None:
         if side == "left":
@@ -120,13 +137,13 @@ def choose_auto_side(
     human_mask: np.ndarray,
     human_box: tuple[int, int, int, int] | None,
     *,
-    v_range: tuple[int, int],
+    roi_v_range: tuple[int, int],
     margin_pixels: int,
 ) -> str:
-    """Choose the side with the stronger target-band depth support."""
+    """Choose the side with stronger non-human depth support near the target band."""
     height, width = valid.shape
     rows = np.arange(height)[:, None]
-    band = (rows >= v_range[0]) & (rows <= v_range[1])
+    level_band = (rows >= roi_v_range[0]) & (rows <= roi_v_range[1])
     scores: dict[str, int] = {}
     for side in ("left", "right"):
         side_mask = side_mask_for_frame(
@@ -135,7 +152,7 @@ def choose_auto_side(
             side=side,
             margin_pixels=margin_pixels,
         )
-        scores[side] = int((valid & ~human_mask & band & side_mask).sum())
+        scores[side] = int((valid & ~human_mask & level_band & side_mask).sum())
     return "right" if scores["right"] >= scores["left"] else "left"
 
 
@@ -169,140 +186,301 @@ def load_human_height(clip_dir: Path) -> float | None:
     return float(height) if height is not None else None
 
 
-def maybe_open3d_filter(points: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
-    """Optionally denoise target candidates with Open3D if it is installed."""
-    stats: dict[str, Any] = {"available": False, "used": False}
-    try:
-        import open3d as o3d  # type: ignore
-    except Exception as exc:
-        stats["reason"] = f"open3d_not_available: {exc.__class__.__name__}"
-        return points, stats
-
-    stats["available"] = True
-    if points.shape[0] < 100:
-        stats["reason"] = "too_few_points"
-        return points, stats
-
-    point_cloud = o3d.geometry.PointCloud()
-    point_cloud.points = o3d.utility.Vector3dVector(points.astype(np.float64))
-    point_cloud = point_cloud.voxel_down_sample(voxel_size=0.015)
-    point_cloud, _ = point_cloud.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-    filtered = np.asarray(point_cloud.points, dtype=np.float32)
-    if filtered.shape[0] < 100:
-        stats["reason"] = "filtered_too_few_points"
-        return points, stats
-
-    stats.update(
-        {
-            "used": True,
-            "input_points": int(points.shape[0]),
-            "filtered_points": int(filtered.shape[0]),
-        }
-    )
-    return filtered, stats
+def contiguous_true_runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """Convert a boolean 1D mask into inclusive index runs."""
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    for idx, value in enumerate(mask.tolist()):
+        if value and start is None:
+            start = idx
+        elif not value and start is not None:
+            runs.append((start, idx - 1))
+            start = None
+    if start is not None:
+        runs.append((start, len(mask) - 1))
+    return runs
 
 
-def select_target_height(
-    heights: np.ndarray,
+def detect_hand_anchor(
+    human_mask: np.ndarray,
     *,
+    side: str,
     level: str,
-    fallback_percentile: float,
-) -> tuple[float, dict[str, Any]]:
-    """Select a target height from dense shelf/object surface modes."""
-    heights = np.asarray(heights, dtype=np.float32)
-    fallback = float(np.percentile(heights, fallback_percentile))
-    quantiles = np.percentile(heights, [10, 35, 50, 65, 90])
+    human_box: tuple[int, int, int, int] | None,
+) -> dict[str, Any] | None:
+    """Detect the target-side hand anchor from the mask silhouette extremity."""
+    if human_box is None:
+        return None
 
-    if level == "high":
-        keep_low, keep_high = float(quantiles[3]), float(quantiles[4])
-    elif level == "low":
-        keep_low, keep_high = float(quantiles[0]), float(quantiles[1])
-    else:
-        keep_low, keep_high = float(quantiles[1]), float(quantiles[3])
+    xmin, ymin, xmax, ymax = human_box
+    bbox_height = ymax - ymin + 1
+    bbox_width = xmax - xmin + 1
+    if bbox_height < 20 or bbox_width < 20:
+        return None
 
-    hist_min = max(0.0, float(heights.min()) - 0.03)
-    hist_max = min(3.2, float(heights.max()) + 0.03)
-    bin_edges = np.arange(hist_min, hist_max + 0.0301, 0.03)
-    if bin_edges.size < 5:
-        return fallback, {
-            "method": "fallback_percentile_too_few_bins",
-            "fallback_percentile": fallback_percentile,
-            "fallback_height_m": fallback,
-        }
+    frac0, frac1 = LEVEL_CONFIGS[level]["bbox_hand_v_fraction"]
+    row_start = max(ymin, ymin + int(frac0 * bbox_height))
+    row_end = min(ymax, ymin + int(frac1 * bbox_height))
 
-    counts, edges = np.histogram(heights, bins=bin_edges)
-    centers = (edges[:-1] + edges[1:]) / 2.0
-    smooth = np.convolve(counts.astype(np.float32), np.ones(5, dtype=np.float32) / 5.0, mode="same")
-    min_peak_count = max(100.0, 0.05 * float(smooth.max(initial=0.0)))
-
-    peaks: list[dict[str, Any]] = []
-    for index in range(1, smooth.shape[0] - 1):
-        if smooth[index] < min_peak_count:
+    rows: list[int] = []
+    edges: list[int] = []
+    for row_index in range(row_start, row_end + 1):
+        cols = np.where(human_mask[row_index])[0]
+        if cols.size == 0:
             continue
-        if smooth[index] >= smooth[index - 1] and smooth[index] >= smooth[index + 1]:
-            height = float(centers[index])
-            peaks.append(
-                {
-                    "height_m": height,
-                    "smoothed_count": float(smooth[index]),
-                    "raw_count": int(counts[index]),
-                    "in_level_band": bool(keep_low <= height <= keep_high),
-                }
-            )
+        rows.append(row_index)
+        edges.append(int(cols.min()) if side == "left" else int(cols.max()))
 
-    level_peaks = [peak for peak in peaks if peak["in_level_band"]]
-    if not level_peaks:
-        return fallback, {
-            "method": "fallback_percentile_no_level_peak",
-            "fallback_percentile": fallback_percentile,
-            "fallback_height_m": fallback,
-            "level_height_band_m": [keep_low, keep_high],
-            "peaks": peaks[:12],
-        }
+    if len(rows) < 8:
+        return None
 
-    selected = max(level_peaks, key=lambda peak: peak["smoothed_count"])
-    return float(selected["height_m"]), {
-        "method": "level_band_histogram_mode",
-        "fallback_percentile": fallback_percentile,
-        "fallback_height_m": fallback,
-        "level_height_band_m": [keep_low, keep_high],
-        "selected_peak": selected,
-        "peaks": sorted(peaks, key=lambda peak: peak["smoothed_count"], reverse=True)[:12],
+    rows_arr = np.asarray(rows, dtype=np.int32)
+    edges_arr = np.asarray(edges, dtype=np.int32)
+    best_edge = int(edges_arr.min()) if side == "left" else int(edges_arr.max())
+    edge_tolerance = max(10, int(0.05 * bbox_width))
+    if side == "left":
+        near_best = edges_arr <= best_edge + edge_tolerance
+    else:
+        near_best = edges_arr >= best_edge - edge_tolerance
+
+    runs = contiguous_true_runs(near_best)
+    if not runs:
+        best_local_index = int(np.argmin(edges_arr) if side == "left" else np.argmax(edges_arr))
+        anchor_row = int(rows_arr[best_local_index])
+        anchor_edge = int(edges_arr[best_local_index])
+        run_rows = np.asarray([anchor_row], dtype=np.int32)
+    else:
+        best_run = max(runs, key=lambda run: (run[1] - run[0] + 1, float(rows_arr[run[0] : run[1] + 1].mean())))
+        run_rows = rows_arr[best_run[0] : best_run[1] + 1]
+        anchor_row = int(np.median(run_rows))
+        row_offset = int(np.argmin(np.abs(rows_arr - anchor_row)))
+        anchor_edge = int(edges_arr[row_offset])
+
+    return {
+        "method": "target_side_mask_extremity",
+        "side": side,
+        "level": level,
+        "search_rows_pixels": [int(row_start), int(row_end)],
+        "anchor_uv_px": [int(anchor_edge), int(anchor_row)],
+        "target_side_edge_best_px": best_edge,
+        "target_side_edge_tolerance_px": int(edge_tolerance),
+        "anchor_row_cluster_pixels": [int(run_rows.min()), int(run_rows.max())],
+        "human_bbox_xyxy": [int(xmin), int(ymin), int(xmax), int(ymax)],
     }
+
+
+def collect_hand_patch(
+    depth: np.ndarray,
+    intrinsics: Any,
+    human_mask: np.ndarray,
+    *,
+    side: str,
+    anchor_uv: tuple[int, int],
+    human_box: tuple[int, int, int, int] | None,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Collect a local depth patch just inside the detected hand extremity."""
+    if human_box is None:
+        return (
+            np.empty((0, 3), dtype=np.float32),
+            np.empty((0, 2), dtype=np.int32),
+            {"status": "missing_human_box"},
+        )
+
+    xmin, ymin, xmax, ymax = human_box
+    anchor_x, anchor_y = anchor_uv
+    bbox_height = ymax - ymin + 1
+    bbox_width = xmax - xmin + 1
+    row_half_span = max(8, int(0.03 * bbox_height))
+    inward_span = max(18, int(0.10 * bbox_width))
+
+    attempts = [
+        {"row_half_span": row_half_span, "inward_span": inward_span},
+        {"row_half_span": row_half_span * 2, "inward_span": int(inward_span * 1.4)},
+        {"row_half_span": row_half_span * 3, "inward_span": int(inward_span * 1.8)},
+    ]
+
+    for attempt in attempts:
+        y0 = max(ymin, anchor_y - attempt["row_half_span"])
+        y1 = min(ymax, anchor_y + attempt["row_half_span"])
+        if side == "right":
+            x0 = max(xmin, anchor_x - attempt["inward_span"])
+            x1 = min(xmax, anchor_x)
+        else:
+            x0 = max(xmin, anchor_x)
+            x1 = min(xmax, anchor_x + attempt["inward_span"])
+
+        local_mask = np.zeros_like(human_mask, dtype=bool)
+        local_mask[y0 : y1 + 1, x0 : x1 + 1] = True
+        valid = human_mask & local_mask & valid_depth_mask(depth)
+        points, uv = backproject_depth_to_pointcloud(depth, intrinsics, valid_mask=valid, return_uv=True)
+        if points.shape[0] >= 20:
+            return points.astype(np.float32), uv.astype(np.int32), {
+                "status": "ok",
+                "patch_xyxy": [int(x0), int(y0), int(x1), int(y1)],
+                "row_half_span_px": int(attempt["row_half_span"]),
+                "inward_span_px": int(attempt["inward_span"]),
+                "point_count": int(points.shape[0]),
+            }
+
+    return (
+        np.empty((0, 3), dtype=np.float32),
+        np.empty((0, 2), dtype=np.int32),
+        {
+            "status": "too_few_valid_depth_points",
+            "anchor_uv_px": [int(anchor_x), int(anchor_y)],
+            "attempts": attempts,
+        },
+    )
+
+
+def fallback_roi_height(
+    *,
+    depth: np.ndarray,
+    intrinsics: Any,
+    human_mask: np.ndarray,
+    human_box: tuple[int, int, int, int] | None,
+    level: str,
+    side: str,
+    floor_y: float,
+    margin_pixels: int,
+) -> tuple[float, np.ndarray, np.ndarray, tuple[float, float], dict[str, Any]]:
+    """Estimate a target height from a simple shelf-side depth ROI."""
+    valid = valid_depth_mask(depth)
+    height, width = depth.shape
+    v_frac0, v_frac1 = LEVEL_CONFIGS[level]["roi_v_fraction"]
+    v_range = (int(v_frac0 * height), int(v_frac1 * height))
+    rows = np.arange(height)[:, None]
+    level_band = (rows >= v_range[0]) & (rows <= v_range[1])
+    side_band = side_mask_for_frame(
+        width=width,
+        human_box=human_box,
+        side=side,
+        margin_pixels=margin_pixels,
+    )
+    candidate_mask = valid & ~human_mask & level_band & side_band
+    candidate_points, candidate_uv = backproject_depth_to_pointcloud(
+        depth,
+        intrinsics,
+        valid_mask=candidate_mask,
+        return_uv=True,
+    )
+    if candidate_points.shape[0] < 20:
+        raise ValueError(
+            "Too few fallback shelf/object candidate points. "
+            "Try --shelf-side auto or check the human mask quality."
+        )
+
+    heights = floor_y - candidate_points[:, 1]
+    plausible = (heights > 0.15) & (heights < 3.2)
+    candidate_points = candidate_points[plausible]
+    candidate_uv = candidate_uv[plausible]
+    heights = heights[plausible]
+    if heights.shape[0] < 20:
+        raise ValueError("Too few plausible fallback shelf/object height candidates after filtering.")
+
+    percentile = float(LEVEL_CONFIGS[level]["fallback_percentile"])
+    target_height_m = float(np.percentile(heights, percentile))
+    selected = np.abs(heights - target_height_m) <= 0.06
+    if int(selected.sum()) < 10:
+        selected = np.abs(heights - target_height_m) <= 0.10
+    selected_heights = heights[selected]
+    if selected_heights.shape[0] >= 10:
+        uncertainty_low, uncertainty_high = np.percentile(selected_heights, [16, 84])
+    else:
+        uncertainty_low, uncertainty_high = target_height_m - 0.06, target_height_m + 0.06
+
+    stats = {
+        "method": "shelf_side_depth_roi_percentile_fallback",
+        "target_v_range_pixels": [int(v_range[0]), int(v_range[1])],
+        "candidate_count": int(candidate_points.shape[0]),
+        "percentile": percentile,
+        "patch_quantiles_m": {str(q): float(np.percentile(heights, q)) for q in [5, 25, 50, 75, 95]},
+    }
+    return (
+        target_height_m,
+        candidate_points.astype(np.float32),
+        candidate_uv[selected].astype(np.int32),
+        (float(uncertainty_low), float(uncertainty_high)),
+        stats,
+    )
 
 
 def save_height_preview(
     *,
     rgb: np.ndarray,
-    candidate_uv: np.ndarray,
-    selected_uv: np.ndarray,
-    v_range: tuple[int, int],
+    human_box: tuple[int, int, int, int] | None,
     side: str,
+    hand_search_rows: tuple[int, int] | None,
+    hand_anchor_uv: tuple[int, int] | None,
+    local_patch_xyxy: tuple[int, int, int, int] | None,
+    selected_uv: np.ndarray,
     out_path: Path,
 ) -> None:
-    """Save an RGB overlay showing the shelf-height candidate region."""
+    """Save an RGB overlay showing the hand anchor and local height patch."""
     import matplotlib.pyplot as plt
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(12, 7))
     ax.imshow(rgb)
-    ax.axhspan(v_range[0], v_range[1], color="yellow", alpha=0.12, label="target level band")
 
-    if candidate_uv.size:
-        candidate_sample = candidate_uv
-        if candidate_sample.shape[0] > 4000:
-            idx = np.random.default_rng(0).choice(candidate_sample.shape[0], 4000, replace=False)
-            candidate_sample = candidate_sample[idx]
-        ax.scatter(candidate_sample[:, 0], candidate_sample[:, 1], s=1, c="cyan", alpha=0.12, label="candidates")
+    if human_box is not None:
+        xmin, ymin, xmax, ymax = human_box
+        ax.add_patch(
+            plt.Rectangle(
+                (xmin, ymin),
+                xmax - xmin,
+                ymax - ymin,
+                fill=False,
+                edgecolor="#7aa5c7",
+                linewidth=1.2,
+                linestyle="--",
+                label="human bbox",
+            )
+        )
+
+    if hand_search_rows is not None:
+        ax.axhspan(
+            hand_search_rows[0],
+            hand_search_rows[1],
+            color="orange",
+            alpha=0.10,
+            label=f"{side} hand search band",
+        )
+
+    if local_patch_xyxy is not None:
+        x0, y0, x1, y1 = local_patch_xyxy
+        ax.add_patch(
+            plt.Rectangle(
+                (x0, y0),
+                x1 - x0,
+                y1 - y0,
+                fill=False,
+                edgecolor="red",
+                linewidth=1.4,
+                label="local hand patch",
+            )
+        )
 
     if selected_uv.size:
-        selected_sample = selected_uv
-        if selected_sample.shape[0] > 2500:
-            idx = np.random.default_rng(1).choice(selected_sample.shape[0], 2500, replace=False)
-            selected_sample = selected_sample[idx]
-        ax.scatter(selected_sample[:, 0], selected_sample[:, 1], s=2, c="red", alpha=0.35, label="height band")
+        sample = selected_uv
+        if sample.shape[0] > 2500:
+            idx = PREVIEW_RNG.choice(sample.shape[0], 2500, replace=False)
+            sample = sample[idx]
+        ax.scatter(sample[:, 0], sample[:, 1], s=3, c="red", alpha=0.35, label="selected depth pixels")
 
-    ax.set_title(f"Shelf/object height candidates ({side} side)")
+    if hand_anchor_uv is not None:
+        ax.scatter(
+            [hand_anchor_uv[0]],
+            [hand_anchor_uv[1]],
+            s=70,
+            c="yellow",
+            edgecolors="black",
+            linewidths=0.8,
+            marker="*",
+            label="hand anchor",
+        )
+
+    ax.set_title("Hand-anchored target height preview")
     ax.set_xlim(0, rgb.shape[1])
     ax.set_ylim(rgb.shape[0], 0)
     ax.axis("off")
@@ -315,79 +493,111 @@ def save_height_preview(
 def save_height_report(
     *,
     rgb: np.ndarray,
-    candidate_uv: np.ndarray,
-    selected_uv: np.ndarray,
-    filtered_heights: np.ndarray,
-    v_range: tuple[int, int],
+    human_box: tuple[int, int, int, int] | None,
     side: str,
+    hand_search_rows: tuple[int, int] | None,
+    hand_anchor_uv: tuple[int, int] | None,
+    local_patch_xyxy: tuple[int, int, int, int] | None,
+    selected_uv: np.ndarray,
+    heights: np.ndarray,
     target_height_m: float,
     uncertainty_band_m: tuple[float, float],
-    height_selection_stats: dict[str, Any],
+    method: str,
     human_height_m: float | None,
     height_ratio: float | None,
     calibrated_height_m: float | None,
     out_path: Path,
 ) -> None:
-    """Save a combined visual report for manual shelf-height inspection."""
+    """Save a combined visual report for manual height inspection."""
     import matplotlib.pyplot as plt
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
 
     axes[0].imshow(rgb)
-    axes[0].axhspan(v_range[0], v_range[1], color="yellow", alpha=0.12, label="target level band")
-    if candidate_uv.size:
-        candidate_sample = candidate_uv
-        if candidate_sample.shape[0] > 3500:
-            idx = np.random.default_rng(0).choice(candidate_sample.shape[0], 3500, replace=False)
-            candidate_sample = candidate_sample[idx]
-        axes[0].scatter(candidate_sample[:, 0], candidate_sample[:, 1], s=1, c="cyan", alpha=0.12, label="candidates")
+    if human_box is not None:
+        xmin, ymin, xmax, ymax = human_box
+        axes[0].add_patch(
+            plt.Rectangle(
+                (xmin, ymin),
+                xmax - xmin,
+                ymax - ymin,
+                fill=False,
+                edgecolor="#7aa5c7",
+                linewidth=1.2,
+                linestyle="--",
+                label="human bbox",
+            )
+        )
+    if hand_search_rows is not None:
+        axes[0].axhspan(
+            hand_search_rows[0],
+            hand_search_rows[1],
+            color="orange",
+            alpha=0.10,
+            label=f"{side} hand search band",
+        )
+    if local_patch_xyxy is not None:
+        x0, y0, x1, y1 = local_patch_xyxy
+        axes[0].add_patch(
+            plt.Rectangle(
+                (x0, y0),
+                x1 - x0,
+                y1 - y0,
+                fill=False,
+                edgecolor="red",
+                linewidth=1.4,
+                label="local hand patch",
+            )
+        )
     if selected_uv.size:
-        selected_sample = selected_uv
-        if selected_sample.shape[0] > 2500:
-            idx = np.random.default_rng(1).choice(selected_sample.shape[0], 2500, replace=False)
-            selected_sample = selected_sample[idx]
-        axes[0].scatter(selected_sample[:, 0], selected_sample[:, 1], s=2, c="red", alpha=0.35, label="selected height band")
-    axes[0].set_title(f"Keyframe target ROI ({side} side)")
+        sample = selected_uv
+        if sample.shape[0] > 2500:
+            idx = PREVIEW_RNG.choice(sample.shape[0], 2500, replace=False)
+            sample = sample[idx]
+        axes[0].scatter(sample[:, 0], sample[:, 1], s=3, c="red", alpha=0.35, label="selected depth pixels")
+    if hand_anchor_uv is not None:
+        axes[0].scatter(
+            [hand_anchor_uv[0]],
+            [hand_anchor_uv[1]],
+            s=70,
+            c="yellow",
+            edgecolors="black",
+            linewidths=0.8,
+            marker="*",
+            label="hand anchor",
+        )
+    axes[0].set_title("Keyframe hand anchor")
     axes[0].set_xlim(0, rgb.shape[1])
     axes[0].set_ylim(rgb.shape[0], 0)
     axes[0].axis("off")
     axes[0].legend(loc="lower left")
 
-    axes[1].hist(filtered_heights, bins=80, color="#8fa7b3", alpha=0.8, label="candidate heights")
+    axes[1].hist(heights, bins=min(60, max(12, heights.shape[0] // 3)), color="#8fa7b3", alpha=0.82)
     axes[1].axvspan(
         uncertainty_band_m[0],
         uncertainty_band_m[1],
         color="red",
         alpha=0.16,
-        label="selected uncertainty band",
+        label="uncertainty band",
     )
     axes[1].axvline(target_height_m, color="red", linewidth=2.0, label="selected height")
-    fallback_height = height_selection_stats.get("fallback_height_m")
-    if fallback_height is not None:
-        axes[1].axvline(
-            float(fallback_height),
-            color="black",
-            linestyle="--",
-            linewidth=1.2,
-            label="fallback percentile",
-        )
     axes[1].set_xlabel("height above floor (meters)")
-    axes[1].set_ylabel("candidate count")
-    axes[1].set_title("Depth ROI height distribution")
+    axes[1].set_ylabel("point count")
+    axes[1].set_title("Local depth-patch height distribution")
     axes[1].legend(loc="upper right")
 
     lines = [
-        f"estimated shelf/object height: {target_height_m:.3f} m",
+        f"estimated target height: {target_height_m:.3f} m",
         f"uncertainty band: [{uncertainty_band_m[0]:.3f}, {uncertainty_band_m[1]:.3f}] m",
+        f"method: {method}",
     ]
     if human_height_m is not None:
         lines.append(f"estimated human height: {human_height_m:.3f} m")
     if height_ratio is not None:
-        lines.append(f"shelf / human ratio: {height_ratio:.3f}")
+        lines.append(f"target / human ratio: {height_ratio:.3f}")
     if calibrated_height_m is not None:
-        lines.append(f"known-height calibrated shelf height: {calibrated_height_m:.3f} m")
-    lines.append(f"selection method: {height_selection_stats.get('method', 'unknown')}")
+        lines.append(f"known-height calibrated target height: {calibrated_height_m:.3f} m")
     axes[1].text(
         0.02,
         0.98,
@@ -404,23 +614,23 @@ def save_height_report(
 
 
 def write_height_summary(path: Path, payload: dict[str, Any]) -> None:
-    """Write a concise text summary of the shelf-height estimate."""
-    calibrated = payload.get("known_human_height_calibrated_shelf_height_m")
+    """Write a concise text summary of the target-height estimate."""
+    calibrated = payload.get("known_human_height_calibrated_target_height_m")
     lines = [
-        "Shelf/object height estimate",
+        "Hand-anchored target height estimate",
         f"clip_dir: {payload['clip_dir']}",
         f"position_label: {payload.get('position_label')}",
         f"target_level: {payload.get('target_level')}",
         f"shelf_side: {payload.get('shelf_side')}",
-        f"estimated_shelf_height_m: {payload['estimated_shelf_height_m']:.4f}",
+        f"estimated_target_height_m: {payload['estimated_target_height_m']:.4f}",
         (
-            "estimated_shelf_height_uncertainty_band_m: "
-            f"[{payload['estimated_shelf_height_uncertainty_band_m'][0]:.4f}, "
-            f"{payload['estimated_shelf_height_uncertainty_band_m'][1]:.4f}]"
+            "estimated_target_height_uncertainty_band_m: "
+            f"[{payload['estimated_target_height_uncertainty_band_m'][0]:.4f}, "
+            f"{payload['estimated_target_height_uncertainty_band_m'][1]:.4f}]"
         ),
         f"estimated_human_height_m: {payload.get('estimated_human_height_m')}",
-        f"shelf_to_human_height_ratio: {payload.get('shelf_to_human_height_ratio')}",
-        f"known_human_height_calibrated_shelf_height_m: {calibrated}",
+        f"target_to_human_height_ratio: {payload.get('target_to_human_height_ratio')}",
+        f"known_human_height_calibrated_target_height_m: {calibrated}",
         f"method: {payload.get('method')}",
         "view: shelf_height_report.png and shelf_height_preview.png",
     ]
@@ -428,9 +638,9 @@ def write_height_summary(path: Path, payload: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    """Estimate the prepared-keyframe target shelf/object height."""
+    """Estimate the hand-anchored target height for a prepared keyframe sample."""
     parser = argparse.ArgumentParser(
-        description="Estimate the shelf/object height from a prepared keyframe clip output folder."
+        description="Estimate the target height from the final hand position in a prepared keyframe folder."
     )
     parser.add_argument("clip_dir", help="Clip output folder name or path.")
     parser.add_argument(
@@ -443,25 +653,19 @@ def main() -> None:
         "--shelf-side",
         choices=["left", "right", "auto"],
         default="right",
-        help="Which image side contains the shelf/object target. Default: right.",
-    )
-    parser.add_argument(
-        "--height-percentile",
-        type=float,
-        default=None,
-        help="Override the percentile of target-region heights used for the estimate.",
+        help="Which image side contains the target shelf/object region. Default: right.",
     )
     parser.add_argument(
         "--known-human-height-m",
         type=float,
         default=None,
-        help="Optional real human height. If provided, also report shelf height scaled by this reference.",
+        help="Optional real human height. If provided, also report the calibrated target height.",
     )
     parser.add_argument(
         "--margin-pixels",
         type=int,
         default=24,
-        help="Horizontal margin away from the human mask bbox before searching shelf-side points.",
+        help="Horizontal margin away from the human bbox for the fallback shelf-side ROI.",
     )
     args = parser.parse_args()
 
@@ -469,8 +673,6 @@ def main() -> None:
     clip_dir = resolve_clip_dir(args.clip_dir)
     metadata = load_sample_metadata(clip_dir)
     level = infer_level(metadata.get("position_label"), args.level)
-    config = LEVEL_CONFIGS[level]
-    height_percentile = float(args.height_percentile or config["height_percentile"])
 
     rgb_path = find_one(clip_dir, ".rgb.png")
     depth_path = find_one(clip_dir, ".depth_meters.npy")
@@ -488,63 +690,87 @@ def main() -> None:
         raise ValueError("human_mask.npy must have the same shape as depth_meters.npy.")
 
     valid = valid_depth_mask(depth)
-    height, width = depth.shape
-    v_frac0, v_frac1 = config["v_fraction"]
-    v_range = (int(v_frac0 * height), int(v_frac1 * height))
     human_box = human_bbox(human_mask)
+    if human_box is None:
+        raise ValueError("Human mask is empty, so hand height cannot be estimated.")
+
+    roi_v_frac0, roi_v_frac1 = LEVEL_CONFIGS[level]["roi_v_fraction"]
+    roi_v_range = (int(roi_v_frac0 * depth.shape[0]), int(roi_v_frac1 * depth.shape[0]))
     side = (
-        choose_auto_side(valid, human_mask, human_box, v_range=v_range, margin_pixels=args.margin_pixels)
+        choose_auto_side(valid, human_mask, human_box, roi_v_range=roi_v_range, margin_pixels=args.margin_pixels)
         if args.shelf_side == "auto"
         else args.shelf_side
     )
 
-    rows = np.arange(height)[:, None]
-    level_band = (rows >= v_range[0]) & (rows <= v_range[1])
-    side_band = side_mask_for_frame(
-        width=width,
-        human_box=human_box,
-        side=side,
-        margin_pixels=args.margin_pixels,
-    )
-    candidate_mask = valid & ~human_mask & level_band & side_band
-    candidate_points, candidate_uv = backproject_depth_to_pointcloud(
-        depth,
-        intrinsics,
-        valid_mask=candidate_mask,
-        return_uv=True,
-    )
-    if candidate_points.shape[0] < 100:
-        raise ValueError(
-            f"Too few shelf/object candidate points ({candidate_points.shape[0]}). "
-            "Try --shelf-side auto or override --level."
+    fallback_floor_points = backproject_depth_to_pointcloud(depth, intrinsics, valid_mask=valid, return_uv=False)
+    floor_y, floor_stats = load_floor_reference(clip_dir, fallback_floor_points)
+
+    hand_anchor = detect_hand_anchor(human_mask, side=side, level=level, human_box=human_box)
+    method = "hand_final_height_local_depth_patch"
+    target_height_m: float
+    uncertainty_band_m: tuple[float, float]
+    selected_uv: np.ndarray
+    hand_patch_stats: dict[str, Any]
+    patch_heights: np.ndarray
+    preview_patch_xyxy: tuple[int, int, int, int] | None = None
+
+    if hand_anchor is not None:
+        anchor_uv = tuple(int(v) for v in hand_anchor["anchor_uv_px"])
+        hand_points, hand_uv, hand_patch_stats = collect_hand_patch(
+            depth,
+            intrinsics,
+            human_mask,
+            side=side,
+            anchor_uv=anchor_uv,
+            human_box=human_box,
         )
-
-    floor_y, floor_stats = load_floor_reference(clip_dir, candidate_points)
-    heights = floor_y - candidate_points[:, 1]
-    plausible = (heights > 0.15) & (heights < 3.2)
-    candidate_points = candidate_points[plausible]
-    candidate_uv = candidate_uv[plausible]
-    heights = heights[plausible]
-    if heights.shape[0] < 100:
-        raise ValueError("Too few plausible shelf/object height candidates after filtering.")
-
-    filtered_points, open3d_stats = maybe_open3d_filter(candidate_points)
-    filtered_heights = floor_y - filtered_points[:, 1]
-    target_height_m, height_selection_stats = select_target_height(
-        filtered_heights,
-        level=level,
-        fallback_percentile=height_percentile,
-    )
-    target_y_m = float(floor_y - target_height_m)
-    selected = np.abs(heights - target_height_m) <= 0.06
-    if int(selected.sum()) < 50:
-        selected = np.abs(heights - target_height_m) <= 0.10
-    selected_heights = heights[selected]
-    if selected_heights.shape[0] >= 50:
-        uncertainty_low, uncertainty_high = np.percentile(selected_heights, [16, 84])
+        if hand_patch_stats.get("status") == "ok":
+            preview_patch_xyxy = tuple(int(v) for v in hand_patch_stats["patch_xyxy"])
+            patch_heights = floor_y - hand_points[:, 1]
+            plausible = (patch_heights > 0.15) & (patch_heights < 3.2)
+            hand_points = hand_points[plausible]
+            hand_uv = hand_uv[plausible]
+            patch_heights = patch_heights[plausible]
+        else:
+            patch_heights = np.empty((0,), dtype=np.float32)
     else:
-        uncertainty_low, uncertainty_high = target_height_m - 0.06, target_height_m + 0.06
+        hand_patch_stats = {"status": "hand_anchor_not_found"}
+        hand_uv = np.empty((0, 2), dtype=np.int32)
+        patch_heights = np.empty((0,), dtype=np.float32)
 
+    if patch_heights.shape[0] >= 20:
+        target_height_m = float(np.median(patch_heights))
+        uncertainty_low, uncertainty_high = np.percentile(patch_heights, [16, 84])
+        selected = np.abs(patch_heights - target_height_m) <= 0.05
+        if int(selected.sum()) < 10:
+            selected = np.abs(patch_heights - target_height_m) <= 0.08
+        selected_uv = hand_uv[selected]
+        uncertainty_band_m = (float(uncertainty_low), float(uncertainty_high))
+        target_selection_stats = {
+            "method": "local_hand_patch_median",
+            "point_count": int(patch_heights.shape[0]),
+            "patch_quantiles_m": {str(q): float(np.percentile(patch_heights, q)) for q in [5, 25, 50, 75, 95]},
+        }
+    else:
+        method = "shelf_side_depth_roi_percentile_fallback"
+        hand_anchor = hand_anchor or {
+            "method": "unavailable",
+            "side": side,
+            "level": level,
+        }
+        target_height_m, _fallback_points, selected_uv, uncertainty_band_m, target_selection_stats = fallback_roi_height(
+            depth=depth,
+            intrinsics=intrinsics,
+            human_mask=human_mask,
+            human_box=human_box,
+            level=level,
+            side=side,
+            floor_y=floor_y,
+            margin_pixels=args.margin_pixels,
+        )
+        patch_heights = np.asarray([target_height_m], dtype=np.float32)
+
+    target_y_m = float(floor_y - target_height_m)
     human_height_m = load_human_height(clip_dir)
     height_ratio = float(target_height_m / human_height_m) if human_height_m else None
     calibrated_height = (
@@ -557,24 +783,39 @@ def main() -> None:
     report_path = clip_dir / "shelf_height_report.png"
     stats_path = clip_dir / "shelf_height_estimate.json"
     summary_path = clip_dir / "shelf_height_summary.txt"
+
+    hand_search_rows = None
+    hand_anchor_uv = None
+    if hand_anchor is not None:
+        rows = hand_anchor.get("search_rows_pixels")
+        if rows is not None:
+            hand_search_rows = (int(rows[0]), int(rows[1]))
+        anchor = hand_anchor.get("anchor_uv_px")
+        if anchor is not None:
+            hand_anchor_uv = (int(anchor[0]), int(anchor[1]))
+
     save_height_preview(
         rgb=rgb,
-        candidate_uv=candidate_uv,
-        selected_uv=candidate_uv[selected],
-        v_range=v_range,
+        human_box=human_box,
         side=side,
+        hand_search_rows=hand_search_rows,
+        hand_anchor_uv=hand_anchor_uv,
+        local_patch_xyxy=preview_patch_xyxy,
+        selected_uv=selected_uv,
         out_path=preview_path,
     )
     save_height_report(
         rgb=rgb,
-        candidate_uv=candidate_uv,
-        selected_uv=candidate_uv[selected],
-        filtered_heights=filtered_heights,
-        v_range=v_range,
+        human_box=human_box,
         side=side,
+        hand_search_rows=hand_search_rows,
+        hand_anchor_uv=hand_anchor_uv,
+        local_patch_xyxy=preview_patch_xyxy,
+        selected_uv=selected_uv,
+        heights=patch_heights,
         target_height_m=target_height_m,
-        uncertainty_band_m=(float(uncertainty_low), float(uncertainty_high)),
-        height_selection_stats=height_selection_stats,
+        uncertainty_band_m=uncertainty_band_m,
+        method=method,
         human_height_m=human_height_m,
         height_ratio=height_ratio,
         calibrated_height_m=calibrated_height,
@@ -582,37 +823,35 @@ def main() -> None:
     )
 
     payload = {
-        "status": "shelf_height_estimated",
+        "status": "hand_anchored_target_height_estimated",
         "clip_dir": str(clip_dir),
         "sample_role": metadata.get("sample_role"),
         "position_label": metadata.get("position_label"),
         "target_level": level,
         "shelf_side": side,
-        "method": "keyframe_depth_roi_level_band_histogram_mode",
+        "method": method,
         "floor_reference": floor_stats,
         "target_y_m": target_y_m,
+        "estimated_target_height_m": target_height_m,
+        "estimated_target_height_uncertainty_band_m": [
+            float(uncertainty_band_m[0]),
+            float(uncertainty_band_m[1]),
+        ],
+        "estimated_hand_height_m": target_height_m if method == "hand_final_height_local_depth_patch" else None,
         "estimated_shelf_height_m": target_height_m,
         "estimated_shelf_height_uncertainty_band_m": [
-            float(uncertainty_low),
-            float(uncertainty_high),
+            float(uncertainty_band_m[0]),
+            float(uncertainty_band_m[1]),
         ],
-        "height_percentile": height_percentile,
-        "height_selection": height_selection_stats,
         "estimated_human_height_m": human_height_m,
+        "target_to_human_height_ratio": height_ratio,
         "shelf_to_human_height_ratio": height_ratio,
         "known_human_height_m": args.known_human_height_m,
+        "known_human_height_calibrated_target_height_m": calibrated_height,
         "known_human_height_calibrated_shelf_height_m": calibrated_height,
-        "candidate_stats": {
-            "candidate_count": int(candidate_points.shape[0]),
-            "filtered_candidate_count": int(filtered_points.shape[0]),
-            "human_bbox_xyxy": list(human_box) if human_box else None,
-            "target_v_range_pixels": list(v_range),
-            "height_quantiles_m": {
-                str(q): float(np.percentile(filtered_heights, q))
-                for q in [5, 25, 50, 75, 85, 95]
-            },
-            "open3d_filter": open3d_stats,
-        },
+        "hand_anchor": hand_anchor,
+        "hand_patch": hand_patch_stats,
+        "target_selection": target_selection_stats,
         "inputs": {
             "rgb_png": str(rgb_path),
             "depth_meters_npy": str(depth_path),
@@ -628,7 +867,9 @@ def main() -> None:
         "notes": [
             "Camera Y points down, so height is floor_y_m - target_y_m.",
             "The estimate uses the prepared keyframe: first for lift clips and last for put clips.",
-            "This is an automatic ROI estimate; inspect shelf_height_preview.png before treating it as final measurement.",
+            "The primary estimate is hand-anchored: it measures the final hand height in the selected keyframe, not a full cabinet surface reconstruction.",
+            "Because no color intrinsics / color-depth extrinsics are available, the RGB human mask is resized to depth resolution and remains approximate.",
+            "Inspect shelf_height_preview.png and shelf_height_report.png before treating the result as a final physical measurement.",
         ],
     }
     write_json(stats_path, payload)
