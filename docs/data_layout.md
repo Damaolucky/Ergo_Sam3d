@@ -69,8 +69,6 @@ After geometry preparation:
   human_pointcloud_rgb.ply
   human_pointcloud_preview.png
   mask_stats.json
-  human_geometry.json
-  human_pointcloud_pca_preview.png
   human_mesh.obj
   pred_vertices_3d.npy
   pred_joints_3d.npy

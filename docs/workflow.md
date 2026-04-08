@@ -8,7 +8,6 @@ The pipeline converts one annotated lift clip into:
 - an action-aware keyframe RGB/depth sample for the shelf/object position,
 - a scene point cloud,
 - a human mask and human-only point cloud,
-- a coarse PCA-based human geometry summary,
 - a recovered human mesh and joints,
 - a height-prior mesh-to-pointcloud alignment,
 - a keyframe shelf/object height estimate.
@@ -28,22 +27,12 @@ export ERGO_WORK_ROOT=~/hzhou
 SESSION="2024-05-03_15"
 CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 
-bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
-bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
+bash scripts/bash/run_keyframe_pipeline.sh "$SESSION" "$CLIP"
 
-KEY_SAMPLE="${CLIP}__first_high_24"
-
-bash scripts/bash/run_prepare_geometry.sh "${KEY_SAMPLE}.sample_manifest.json"
-bash scripts/bash/run_human_mask.sh "$KEY_SAMPLE"
-bash scripts/bash/run_analyze_human_geometry.sh "$KEY_SAMPLE"
-
-# New next-stage setup and execution
-bash scripts/bash/setup_hmr2.sh
-bash scripts/bash/run_human_mesh_recovery.sh "$KEY_SAMPLE"
-bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE"
-bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE"
-bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE" --target-human-height-m 1.72
-bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE" --known-human-height-m 1.72
+# Optional known-height calibration
+ERGO_TARGET_HUMAN_HEIGHT_M=1.72 \
+ERGO_KNOWN_HUMAN_HEIGHT_M=1.72 \
+bash scripts/bash/run_keyframe_pipeline.sh "$SESSION" "$CLIP"
 ```
 
 ## Clip Action Rule
@@ -143,26 +132,7 @@ Verified example output:
 - `mask_ratio: 0.04988`
 - `human_point_count: 45045`
 
-### 5. Human geometry analysis
-
-Entry points:
-
-- `scripts/bash/run_analyze_human_geometry.sh`
-- `scripts/python/analyze_human_geometry.py`
-
-Behavior:
-
-- runs PCA on `human_pointcloud.npy`
-- writes `human_geometry.json`
-- writes `human_pointcloud_pca_preview.png`
-
-Verified example output:
-
-- `centroid: [0.242, 0.047, 3.977]`
-- `bbox_extent: [0.961, 2.506, 3.478]`
-- `yaw_degrees: -88.50`
-
-### 6. Human mesh recovery
+### 5. Human mesh recovery
 
 Entry points:
 
@@ -191,7 +161,7 @@ Expected outputs:
 - `mesh_preview.png`
 - `mesh_recovery_stats.json`
 
-### 7. Mesh-to-pointcloud height-prior alignment
+### 6. Mesh-to-pointcloud height-prior alignment
 
 Entry points:
 
@@ -223,7 +193,7 @@ Expected outputs:
 - `mesh_pointcloud_overlay_preview.png`
 - `alignment_stats.json`
 
-### 8. Shelf/object height estimation
+### 7. Shelf/object height estimation
 
 Entry points:
 

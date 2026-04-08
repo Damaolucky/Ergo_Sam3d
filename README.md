@@ -6,10 +6,9 @@ This repository preserves a verified Linux pipeline for:
 2. extracting the action-aware keyframe RGB/depth sample for the shelf/object position,
 3. building a scene point cloud,
 4. generating a human mask and human-only point cloud,
-5. running basic PCA-based human geometry analysis,
-6. preparing a modern HMR2-based human mesh recovery stage,
-7. running a height-prior mesh-to-pointcloud alignment stage,
-8. estimating the corresponding shelf/object height in the same depth frame.
+5. running a modern HMR2-based human mesh recovery stage,
+6. running a height-prior mesh-to-pointcloud alignment stage,
+7. estimating the corresponding shelf/object height in the same depth frame.
 
 The outputs are intended to support later mesh-depth alignment and quantitative geometry evaluation.
 
@@ -21,7 +20,6 @@ Verified stages:
 - RGB/depth sample extraction
 - scene geometry preparation
 - YOLO-based human mask generation
-- PCA-based human geometry analysis
 - HMR2 / 4D-Humans mesh recovery on the verified example clip
 - height-prior mesh-to-pointcloud alignment on the verified example clip
 - keyframe shelf/object height estimation on the verified example clip
@@ -97,18 +95,17 @@ repo_root/
       run_extract_sample.sh
       run_prepare_geometry.sh
       run_human_mask.sh
-      run_analyze_human_geometry.sh
       setup_hmr2.sh
       run_human_mesh_recovery.sh
       run_align_mesh.sh
       run_estimate_shelf_height.sh
+      run_keyframe_pipeline.sh
     python/
       pipeline_utils.py
       map_clip_to_frames_from_tar.py
       extract_sample_from_mapping.py
       prepare_geometry_sample.py
       generate_human_mask.py
-      analyze_human_geometry.py
       recover_human_mesh.py
       align_mesh_to_pointcloud.py
       estimate_shelf_height.py
@@ -186,26 +183,12 @@ export ERGO_WORK_ROOT=~/hzhou
 SESSION="2024-05-03_15"
 CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 
-bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
-bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
-
-KEY_SAMPLE="${CLIP}__first_high_24"
-
-bash scripts/bash/run_prepare_geometry.sh "${KEY_SAMPLE}.sample_manifest.json"
-bash scripts/bash/run_human_mask.sh "$KEY_SAMPLE"
-bash scripts/bash/run_analyze_human_geometry.sh "$KEY_SAMPLE"
-
-# Optional next-stage setup
-bash scripts/bash/setup_hmr2.sh
-
-# New next-stage steps
-bash scripts/bash/run_human_mesh_recovery.sh "$KEY_SAMPLE"
-bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE"
-bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE"
+bash scripts/bash/run_keyframe_pipeline.sh "$SESSION" "$CLIP"
 
 # Optional: if the subject's real height is known, use it directly for scale calibration
-bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE" --target-human-height-m 1.72
-bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE" --known-human-height-m 1.72
+ERGO_TARGET_HUMAN_HEIGHT_M=1.72 \
+ERGO_KNOWN_HUMAN_HEIGHT_M=1.72 \
+bash scripts/bash/run_keyframe_pipeline.sh "$SESSION" "$CLIP"
 ```
 
 Outputs are written under `${ERGO_WORK_ROOT:-~/hzhou}/outputs/`.
@@ -215,10 +198,10 @@ Important behavior:
 - Step 1 creates `<clip>.mapping.json`
 - Step 2 creates one action-aware keyframe sample by default, such as `<clip>__first_high_24.*` for a `lift` clip or `<clip>__last_high_24.*` for a `put` clip
 - Step 3 moves that keyframe sample into its own folder under `outputs/<clip>__<role>_<position>/`
-- Steps 4 and 5 operate on the keyframe endpoint folder
-- Step 6 writes mesh recovery artifacts into that endpoint folder
-- Step 7 writes height-prior alignment artifacts into that endpoint folder
-- Step 8 writes shelf/object height estimates into that endpoint folder
+- Step 4 writes human mask and human point-cloud artifacts into that endpoint folder
+- Step 5 writes mesh recovery artifacts into that endpoint folder
+- Step 6 writes height-prior alignment artifacts into that endpoint folder
+- Step 7 writes shelf/object height estimates into that endpoint folder
 
 ## Step Outputs
 
@@ -242,11 +225,6 @@ Important behavior:
 - human mask coverage
 - masked valid depth pixel count
 - human point count and masked depth statistics
-
-`human_geometry.json`
-
-- PCA eigenvalues and axes for the human point cloud
-- centroid, bounding box extent, and coarse yaw on the X-Z plane
 
 `mesh_recovery_stats.json`
 
@@ -308,13 +286,6 @@ Verified human mask example:
 - `human_point_count: 45045`
 - `human_depth_mean_m: 3.9768`
 
-Verified human geometry example:
-
-- `num_points: 45045`
-- `centroid: [0.242, 0.047, 3.977]`
-- `bbox_extent: [0.961, 2.506, 3.478]`
-- `yaw_degrees: -88.50`
-
 Verified mesh recovery example:
 
 - `num_vertices: 6890`
@@ -340,7 +311,6 @@ Verified shelf/object height example:
 - Timestamps in the session tarballs are absolute millisecond timestamps and must be converted to relative seconds by subtracting the first frame time.
 - YOLO segmentation masks may be produced at a lower resolution than the depth frame and must be resized with nearest-neighbor before masking depth.
 - Human point clouds can still contain background contamination.
-- The current yaw estimate is only a coarse PCA-based orientation, not a reliable human facing direction.
 - HMR2 mesh recovery still requires the official SMPL neutral model file even though the checkpoint download itself is automatic.
 - The current mesh alignment stage is yaw-only and height-prior with multi-stage partial-Chamfer refinement; it is more stable than full 3D PCA, but it does not deform the SMPL pose/body shape.
 

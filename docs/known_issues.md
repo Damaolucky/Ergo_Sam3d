@@ -12,10 +12,6 @@ Session timestamps are stored as absolute timestamps, typically milliseconds sin
 
 The current human mask is good enough to produce a first-pass human point cloud, but the result can still include background points. This is visible in the large `bbox_extent.z` values for the verified example.
 
-## Yaw is only a coarse orientation cue
-
-`yaw_degrees` in `human_geometry.json` comes from the first PCA axis on the X-Z plane. It should not be treated as the real human facing direction.
-
 ## HMR2 still requires the official SMPL neutral model
 
 The selected mesh recovery stage uses 4D-Humans / HMR2. Its model checkpoints download automatically, but the official SMPL neutral model file is still required before mesh recovery can run end-to-end.
