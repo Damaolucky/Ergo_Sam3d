@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Extract last-frame RGB/depth samples from a mapping JSON.
+"""Extract keyframe RGB/depth samples from a mapping JSON.
 
 The mapping file still records first/mid/last frame references for traceability,
-but the default production workflow now keeps only the final clip frame because
-the final frame corresponds to the destination shelf position, such as `low` in
-a `mid -> low` clip.
+but the default production workflow extracts one action-aware keyframe:
+`*_lift.mp4` clips use the first frame at the source shelf/object position, and
+`*_put.mp4` clips use the last frame at the destination shelf/object position.
 """
 
 from __future__ import annotations
@@ -32,6 +32,9 @@ from pipeline_utils import (
     save_pickle,
     write_json,
 )
+
+
+CLIP_ACTIONS = ("lift", "put")
 
 
 def load_npy_from_bytes(payload: bytes) -> np.ndarray:
@@ -176,14 +179,42 @@ def legacy_sample_frames(mapping: dict[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
+def infer_clip_action(clip_name: str) -> str:
+    """Infer the clip action from the filename suffix."""
+    stem = Path(clip_name).stem.lower()
+    for action in CLIP_ACTIONS:
+        if stem.endswith(f"_{action}"):
+            return action
+    return "unknown"
+
+
+def recommended_sample_role(mapping: dict[str, Any]) -> str:
+    """Resolve the production keyframe role from mapping metadata or filename."""
+    explicit = mapping.get("recommended_sample_role")
+    if explicit in {"first", "last", "mid"}:
+        return explicit
+
+    action = mapping.get("clip_action") or infer_clip_action(mapping["clip_name"])
+    if action == "lift":
+        return "first"
+    if action == "put":
+        return "last"
+    return "last"
+
+
 def choose_sample_frames(mapping: dict[str, Any], sample_roles: list[str]) -> list[dict[str, Any]]:
     """Select the requested sample frame specs from the mapping payload."""
     sample_frames = mapping.get("sample_frames") or legacy_sample_frames(mapping)
     selected: list[dict[str, Any]] = []
+    seen_roles: set[str] = set()
     for role in sample_roles:
-        if role not in sample_frames:
-            raise KeyError(f"Requested sample role '{role}' not present in mapping JSON.")
-        selected.append(sample_frames[role])
+        resolved_role = recommended_sample_role(mapping) if role == "auto" else role
+        if resolved_role in seen_roles:
+            continue
+        if resolved_role not in sample_frames:
+            raise KeyError(f"Requested sample role '{resolved_role}' not present in mapping JSON.")
+        selected.append(sample_frames[resolved_role])
+        seen_roles.add(resolved_role)
     return selected
 
 
@@ -258,7 +289,7 @@ def save_one_sample(
 def main() -> None:
     """Parse arguments and extract sample assets for one mapped clip."""
     parser = argparse.ArgumentParser(
-        description="Extract the final RGB+depth sample from a mapping JSON."
+        description="Extract the action-aware keyframe RGB+depth sample from a mapping JSON."
     )
     parser.add_argument(
         "mapping",
@@ -270,9 +301,12 @@ def main() -> None:
     parser.add_argument(
         "--sample-roles",
         nargs="+",
-        default=["last"],
-        choices=["first", "last", "mid"],
-        help="Which sample roles to extract. Default: last",
+        default=["auto"],
+        choices=["auto", "first", "last", "mid"],
+        help=(
+            "Which sample roles to extract. Default: auto, which uses first for *_lift.mp4 "
+            "and last for *_put.mp4."
+        ),
     )
     args = parser.parse_args()
 
@@ -328,7 +362,8 @@ def main() -> None:
     payload = {
         "mapping_json": str(mapping_path),
         "source_clip_name": clip_name,
-        "sample_roles": args.sample_roles,
+        "requested_sample_roles": args.sample_roles,
+        "generated_sample_roles": [manifest["sample_role"] for manifest in manifests],
         "generated_samples": manifests,
     }
     print(json.dumps(payload, indent=2))

@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Estimate the destination shelf/object height from the final clip frame.
+"""Estimate a shelf/object height from the prepared keyframe sample.
 
-The pipeline uses the final frame because the clip metadata encodes the target
-position in `height2` / `height2_strength`. In the camera frame used by the
-depth backprojection, `Y` points downward, so a vertical height above the floor
-is computed as:
+The prepared keyframe is action-aware: `*_lift.mp4` clips use the first frame at
+the source shelf/object position, while `*_put.mp4` clips use the last frame at
+the destination shelf/object position. In the camera frame used by the depth
+backprojection, `Y` points downward, so a vertical height above the floor is
+computed as:
 
     height_m = floor_y_m - target_y_m
 
 The floor reference is taken from the aligned human mesh feet when available.
 The target shelf/object height is estimated from a shelf-side region of the
-final RGB/depth frame and stored with an uncertainty band for manual review.
+prepared RGB/depth keyframe and stored with an uncertainty band for manual
+review.
 """
 
 from __future__ import annotations
@@ -346,7 +348,7 @@ def save_height_report(
             idx = np.random.default_rng(1).choice(selected_sample.shape[0], 2500, replace=False)
             selected_sample = selected_sample[idx]
         axes[0].scatter(selected_sample[:, 0], selected_sample[:, 1], s=2, c="red", alpha=0.35, label="selected height band")
-    axes[0].set_title(f"Final-frame target ROI ({side} side)")
+    axes[0].set_title(f"Keyframe target ROI ({side} side)")
     axes[0].set_xlim(0, rgb.shape[1])
     axes[0].set_ylim(rgb.shape[0], 0)
     axes[0].axis("off")
@@ -426,9 +428,9 @@ def write_height_summary(path: Path, payload: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    """Estimate the final-frame target shelf/object height."""
+    """Estimate the prepared-keyframe target shelf/object height."""
     parser = argparse.ArgumentParser(
-        description="Estimate the destination shelf/object height from a final-frame clip output folder."
+        description="Estimate the shelf/object height from a prepared keyframe clip output folder."
     )
     parser.add_argument("clip_dir", help="Clip output folder name or path.")
     parser.add_argument(
@@ -586,7 +588,7 @@ def main() -> None:
         "position_label": metadata.get("position_label"),
         "target_level": level,
         "shelf_side": side,
-        "method": "final_frame_depth_roi_level_band_histogram_mode",
+        "method": "keyframe_depth_roi_level_band_histogram_mode",
         "floor_reference": floor_stats,
         "target_y_m": target_y_m,
         "estimated_shelf_height_m": target_height_m,
@@ -625,7 +627,7 @@ def main() -> None:
         },
         "notes": [
             "Camera Y points down, so height is floor_y_m - target_y_m.",
-            "The estimate uses only the final frame because it corresponds to the destination shelf position.",
+            "The estimate uses the prepared keyframe: first for lift clips and last for put clips.",
             "This is an automatic ROI estimate; inspect shelf_height_preview.png before treating it as final measurement.",
         ],
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Extract the final RGB/depth sample from a mapping JSON.
+# Extract the action-aware keyframe RGB/depth sample from a mapping JSON.
 
 set -euo pipefail
 
@@ -15,7 +15,13 @@ Usage:
 
 Example:
   bash scripts/bash/run_extract_sample.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.mapping.json
-  bash scripts/bash/run_extract_sample.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.mapping.json --sample-roles last
+  bash scripts/bash/run_extract_sample.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4.mapping.json --sample-roles first
+  bash scripts/bash/run_extract_sample.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_put.mp4.mapping.json --sample-roles last
+
+Default:
+  --sample-roles auto
+  *_lift.mp4 -> first frame at the source shelf/object position
+  *_put.mp4  -> last frame at the destination shelf/object position
 
 Environment:
   ERGO_WORK_ROOT  Default: ~/hzhou. Controls local outputs/.

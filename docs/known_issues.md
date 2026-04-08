@@ -26,4 +26,4 @@ The selected mesh recovery stage uses 4D-Humans / HMR2. Its model checkpoints do
 
 ## Shelf/object height estimation is automatic ROI geometry
 
-`estimate_shelf_height.py` estimates the target shelf/object height from the final-frame depth ROI and uses the aligned human mesh feet as the floor reference. The result should be checked with `shelf_height_preview.png`, especially for clips where the shelf is occluded, the object is not yet at the destination, or the target side is not the default right side.
+`estimate_shelf_height.py` estimates the target shelf/object height from the prepared keyframe depth ROI and uses the aligned human mesh feet as the floor reference. The prepared keyframe is `first` for `*_lift.mp4` and `last` for `*_put.mp4`. The result should be checked with `shelf_height_preview.png`, especially for clips where the shelf is occluded, the object is not yet at the expected source/destination position, or the target side is not the default right side.

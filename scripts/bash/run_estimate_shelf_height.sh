@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Estimate the final-frame destination shelf/object height for one clip output folder.
+# Estimate the shelf/object height for one prepared keyframe clip output folder.
 
 set -euo pipefail
 
@@ -14,11 +14,13 @@ Usage:
   bash scripts/bash/run_estimate_shelf_height.sh <clip_output_folder_name_or_path> [extra_python_args...]
 
 Example:
-  bash scripts/bash/run_estimate_shelf_height.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4__last_high_24
-  bash scripts/bash/run_estimate_shelf_height.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4__last_high_24 --level high --shelf-side right
+  bash scripts/bash/run_estimate_shelf_height.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4__first_high_24
+  bash scripts/bash/run_estimate_shelf_height.sh 2024_05_03_15_sagittal_high_24_high_24_5_3_1_put.mp4__last_high_24 --level high --shelf-side right
 
 Notes:
-  This stage assumes the clip folder is the final-frame sample folder.
+  This stage assumes the clip folder is the action-aware keyframe sample folder.
+  *_lift.mp4 samples should normally be first-frame folders.
+  *_put.mp4 samples should normally be last-frame folders.
   The estimate uses aligned_mesh_vertices.npy as the floor/human reference when available.
 EOF
 }

@@ -27,30 +27,37 @@ By default, local outputs are written under:
 
 ## Main Output Files
 
+The default keyframe sample role is action-aware:
+
+- `*_lift.mp4` -> `<clip>__first_<height1>_<height1_strength>`
+- `*_put.mp4` -> `<clip>__last_<height2>_<height2_strength>`
+
+The generic placeholder below is `<role>_<position>`.
+
 Before geometry preparation:
 
 ```text
 ~/hzhou/outputs/
   <clip>.mapping.json
-  <clip>__last_<position>.rgb.png
-  <clip>__last_<position>.depth_raw.npy
-  <clip>__last_<position>.depth_meters.npy
-  <clip>__last_<position>.depth_vis.png
-  <clip>__last_<position>.intrinsics.pkl
-  <clip>__last_<position>.sample_manifest.json
+  <clip>__<role>_<position>.rgb.png
+  <clip>__<role>_<position>.depth_raw.npy
+  <clip>__<role>_<position>.depth_meters.npy
+  <clip>__<role>_<position>.depth_vis.png
+  <clip>__<role>_<position>.intrinsics.pkl
+  <clip>__<role>_<position>.sample_manifest.json
 ```
 
 After geometry preparation:
 
 ```text
-~/hzhou/outputs/<clip>__last_<position>/
+~/hzhou/outputs/<clip>__<role>_<position>/
   <clip>.mapping.json
-  <clip>__last_<position>.rgb.png
-  <clip>__last_<position>.depth_raw.npy
-  <clip>__last_<position>.depth_meters.npy
-  <clip>__last_<position>.depth_vis.png
-  <clip>__last_<position>.intrinsics.pkl
-  <clip>__last_<position>.sample_manifest.json
+  <clip>__<role>_<position>.rgb.png
+  <clip>__<role>_<position>.depth_raw.npy
+  <clip>__<role>_<position>.depth_meters.npy
+  <clip>__<role>_<position>.depth_vis.png
+  <clip>__<role>_<position>.intrinsics.pkl
+  <clip>__<role>_<position>.sample_manifest.json
   pointcloud.npy
   pointcloud_rgb.ply
   pointcloud_preview.png

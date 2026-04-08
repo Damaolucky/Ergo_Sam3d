@@ -14,35 +14,35 @@ CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 # Step 1: clip -> RGB/depth mapping
 bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
 
-# Step 2: extract the final endpoint RGB+depth sample
+# Step 2: extract the action-aware keyframe RGB+depth sample
 bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
 
-LAST_SAMPLE="${CLIP}__last_high_24"
+KEY_SAMPLE="${CLIP}__first_high_24"
 
-# Step 3: move the final endpoint sample into outputs/<sample>/ and prepare scene geometry
-bash scripts/bash/run_prepare_geometry.sh "${LAST_SAMPLE}.sample_manifest.json"
+# Step 3: move the keyframe sample into outputs/<sample>/ and prepare scene geometry
+bash scripts/bash/run_prepare_geometry.sh "${KEY_SAMPLE}.sample_manifest.json"
 
 # Step 4: generate a human mask and masked human point cloud
-bash scripts/bash/run_human_mask.sh "$LAST_SAMPLE"
+bash scripts/bash/run_human_mask.sh "$KEY_SAMPLE"
 
 # Step 5: run PCA-based geometry analysis
-bash scripts/bash/run_analyze_human_geometry.sh "$LAST_SAMPLE"
+bash scripts/bash/run_analyze_human_geometry.sh "$KEY_SAMPLE"
 
 # Step 6: setup HMR2 / 4D-Humans once
 bash scripts/bash/setup_hmr2.sh
 
 # Step 7: recover a human mesh with HMR2
-bash scripts/bash/run_human_mesh_recovery.sh "$LAST_SAMPLE"
+bash scripts/bash/run_human_mesh_recovery.sh "$KEY_SAMPLE"
 
 # Step 8: run the height-prior mesh-to-pointcloud alignment
-bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE"
 
-# Step 9: estimate the destination shelf/object height from the final frame
-bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE"
+# Step 9: estimate the shelf/object height from the prepared keyframe
+bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE"
 
 # Optional: use a known subject height to set/calibrate the final scale explicitly
-bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE" --target-human-height-m 1.72
-bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE" --known-human-height-m 1.72
+bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE" --target-human-height-m 1.72
+bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE" --known-human-height-m 1.72
 ```
 
 Expected verified checkpoints from this example:
@@ -56,4 +56,4 @@ Current next-stage status:
 
 - HMR2 mesh recovery verified on the example clip once the official SMPL neutral model is available
 - alignment stage verified as a height-prior, partial-Chamfer fitting method on the example clip
-- shelf/object height estimation verified on the final-frame `last_high_24` example
+- shelf/object height estimation runs on the action-aware keyframe sample, e.g. `first_high_24` for this `lift` example

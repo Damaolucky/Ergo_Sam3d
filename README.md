@@ -3,7 +3,7 @@
 This repository preserves a verified Linux pipeline for:
 
 1. mapping a human motion clip to RGB/depth frames,
-2. extracting the final-frame RGB/depth sample for the destination shelf position,
+2. extracting the action-aware keyframe RGB/depth sample for the shelf/object position,
 3. building a scene point cloud,
 4. generating a human mask and human-only point cloud,
 5. running basic PCA-based human geometry analysis,
@@ -24,7 +24,7 @@ Verified stages:
 - PCA-based human geometry analysis
 - HMR2 / 4D-Humans mesh recovery on the verified example clip
 - height-prior mesh-to-pointcloud alignment on the verified example clip
-- final-frame shelf/object height estimation on the verified example clip
+- keyframe shelf/object height estimation on the verified example clip
 
 Current caveats:
 
@@ -47,6 +47,33 @@ Optional environment variable overrides:
 - `ERGO_CLIPS_DIR`
 - `ERGO_JSON_ROOT`
 - `ERGO_YOLO_MODEL`
+
+## Clip Naming and Keyframe Rule
+
+Clip filenames follow the metadata pattern:
+
+```text
+<session>_<camera>_<height1>_<height1_strength>_<height2>_<height2_strength>_<weight>_<ratio>_<take>_<action>.mp4
+```
+
+For example:
+
+```text
+2024_05_03_15_sagittal_high_24_low_19_5_3_1_lift.mp4
+```
+
+The fields mean:
+
+- `height1` / `height1_strength`: source shelf/object position
+- `height2` / `height2_strength`: destination shelf/object position
+- `action`: either `lift` or `put`
+
+The production keyframe rule is:
+
+- `*_lift.mp4`: use the first frame, because the object is still at the source position
+- `*_put.mp4`: use the last frame, because the object has reached the destination position
+
+So a full `low -> high` motion is represented by two clips: the `lift` clip uses `first_low_<strength>`, and the `put` clip uses `last_high_<strength>`.
 
 ## Repository Layout
 
@@ -162,23 +189,23 @@ CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
 bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
 
-LAST_SAMPLE="${CLIP}__last_high_24"
+KEY_SAMPLE="${CLIP}__first_high_24"
 
-bash scripts/bash/run_prepare_geometry.sh "${LAST_SAMPLE}.sample_manifest.json"
-bash scripts/bash/run_human_mask.sh "$LAST_SAMPLE"
-bash scripts/bash/run_analyze_human_geometry.sh "$LAST_SAMPLE"
+bash scripts/bash/run_prepare_geometry.sh "${KEY_SAMPLE}.sample_manifest.json"
+bash scripts/bash/run_human_mask.sh "$KEY_SAMPLE"
+bash scripts/bash/run_analyze_human_geometry.sh "$KEY_SAMPLE"
 
 # Optional next-stage setup
 bash scripts/bash/setup_hmr2.sh
 
 # New next-stage steps
-bash scripts/bash/run_human_mesh_recovery.sh "$LAST_SAMPLE"
-bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE"
-bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE"
+bash scripts/bash/run_human_mesh_recovery.sh "$KEY_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE"
+bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE"
 
 # Optional: if the subject's real height is known, use it directly for scale calibration
-bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE" --target-human-height-m 1.72
-bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE" --known-human-height-m 1.72
+bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE" --target-human-height-m 1.72
+bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE" --known-human-height-m 1.72
 ```
 
 Outputs are written under `${ERGO_WORK_ROOT:-~/hzhou}/outputs/`.
@@ -186,9 +213,9 @@ Outputs are written under `${ERGO_WORK_ROOT:-~/hzhou}/outputs/`.
 Important behavior:
 
 - Step 1 creates `<clip>.mapping.json`
-- Step 2 now creates only the final endpoint sample by default, such as `<clip>__last_high_24.*`
-- Step 3 moves that final endpoint sample into its own folder under `outputs/<clip>__last_<position>/`
-- Steps 4 and 5 operate on the final endpoint folder
+- Step 2 creates one action-aware keyframe sample by default, such as `<clip>__first_high_24.*` for a `lift` clip or `<clip>__last_high_24.*` for a `put` clip
+- Step 3 moves that keyframe sample into its own folder under `outputs/<clip>__<role>_<position>/`
+- Steps 4 and 5 operate on the keyframe endpoint folder
 - Step 6 writes mesh recovery artifacts into that endpoint folder
 - Step 7 writes height-prior alignment artifacts into that endpoint folder
 - Step 8 writes shelf/object height estimates into that endpoint folder
@@ -233,9 +260,9 @@ Important behavior:
 
 `shelf_height_estimate.json`
 
-- final-frame shelf/object height estimate in meters
+- keyframe shelf/object height estimate in meters
 - floor reference used for `height = floor_y - target_y`
-- destination position label parsed from the clip metadata, such as `high_24`
+- source or destination position label parsed from the clip metadata, such as `high_24`
 - ratio between the estimated shelf/object height and aligned human height
 
 `shelf_height_preview.png`
@@ -265,7 +292,7 @@ Verified mapping output for the example clip includes:
 
 For this clip, the new endpoint sample folders are named:
 
-- `2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4__last_high_24`
+- `2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4__first_high_24`
 
 Verified geometry example:
 
@@ -302,7 +329,7 @@ Verified height-prior alignment example:
 - alignment-subset-to-mesh p95 distance: approximately `0.131 m`
 - the alignment intentionally avoids scaling the mesh to match contaminated point-cloud depth thickness
 
-Verified shelf/object height example for `last_high_24`:
+Verified shelf/object height example:
 
 - estimated `high` target height: approximately `2.15 m`
 - automatic uncertainty band: approximately `[2.12, 2.19] m`

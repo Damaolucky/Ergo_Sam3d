@@ -26,6 +26,7 @@ from pipeline_utils import (
 
 
 CAMERAS = ("angled", "overhead", "sagittal")
+CLIP_ACTIONS = ("lift", "put")
 
 
 def nearest_index(arr: np.ndarray, value: float) -> int:
@@ -42,6 +43,24 @@ def infer_camera(source_video: str) -> str:
         if stem.endswith(camera):
             return camera
     raise ValueError(f"Could not infer camera from source_video: {source_video}")
+
+
+def infer_clip_action(clip_name: str) -> str:
+    """Infer whether this clip is the lift or put segment."""
+    stem = Path(clip_name).stem.lower()
+    for action in CLIP_ACTIONS:
+        if stem.endswith(f"_{action}"):
+            return action
+    return "unknown"
+
+
+def recommended_sample_role_for_action(action: str) -> tuple[str, str]:
+    """Choose the default keyframe role from the lift/put clip action."""
+    if action == "lift":
+        return "first", "lift clips start at the source shelf/object position"
+    if action == "put":
+        return "last", "put clips end at the destination shelf/object position"
+    return "last", "unknown clip action; using last frame as a conservative default"
 
 
 def resolve_json_path(session_name: str, json_override: str | None) -> Path:
@@ -263,6 +282,8 @@ def build_result(
         meta.get("height2_strength"),
         fallback="last",
     )
+    clip_action = infer_clip_action(clip_name)
+    recommended_sample_role, recommended_sample_reason = recommended_sample_role_for_action(clip_action)
 
     sample_frames = {
         "first": {
@@ -330,6 +351,10 @@ def build_result(
             "tar_member": depth_member_name,
         },
         "sample_frames": sample_frames,
+        "clip_action": clip_action,
+        "recommended_sample_role": recommended_sample_role,
+        "recommended_sample_reason": recommended_sample_reason,
+        "recommended_sample_frame": sample_frames[recommended_sample_role],
         "metadata_fields": {
             "height1": meta.get("height1"),
             "height1_strength": meta.get("height1_strength"),

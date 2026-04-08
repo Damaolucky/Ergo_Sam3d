@@ -5,13 +5,13 @@
 The pipeline converts one annotated lift clip into:
 
 - a verified RGB/depth frame mapping,
-- a final-frame RGB/depth sample for the destination shelf/object position,
+- an action-aware keyframe RGB/depth sample for the shelf/object position,
 - a scene point cloud,
 - a human mask and human-only point cloud,
 - a coarse PCA-based human geometry summary,
 - a recovered human mesh and joints,
 - a height-prior mesh-to-pointcloud alignment,
-- a final-frame shelf/object height estimate.
+- a keyframe shelf/object height estimate.
 
 ## Verified Run Order
 
@@ -31,20 +31,33 @@ CLIP="2024_05_03_15_sagittal_high_24_high_24_5_3_1_lift.mp4"
 bash scripts/bash/run_clip_mapping.sh "$SESSION" "$CLIP"
 bash scripts/bash/run_extract_sample.sh "$CLIP.mapping.json"
 
-LAST_SAMPLE="${CLIP}__last_high_24"
+KEY_SAMPLE="${CLIP}__first_high_24"
 
-bash scripts/bash/run_prepare_geometry.sh "${LAST_SAMPLE}.sample_manifest.json"
-bash scripts/bash/run_human_mask.sh "$LAST_SAMPLE"
-bash scripts/bash/run_analyze_human_geometry.sh "$LAST_SAMPLE"
+bash scripts/bash/run_prepare_geometry.sh "${KEY_SAMPLE}.sample_manifest.json"
+bash scripts/bash/run_human_mask.sh "$KEY_SAMPLE"
+bash scripts/bash/run_analyze_human_geometry.sh "$KEY_SAMPLE"
 
 # New next-stage setup and execution
 bash scripts/bash/setup_hmr2.sh
-bash scripts/bash/run_human_mesh_recovery.sh "$LAST_SAMPLE"
-bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE"
-bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE"
-bash scripts/bash/run_align_mesh.sh "$LAST_SAMPLE" --target-human-height-m 1.72
-bash scripts/bash/run_estimate_shelf_height.sh "$LAST_SAMPLE" --known-human-height-m 1.72
+bash scripts/bash/run_human_mesh_recovery.sh "$KEY_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE"
+bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE"
+bash scripts/bash/run_align_mesh.sh "$KEY_SAMPLE" --target-human-height-m 1.72
+bash scripts/bash/run_estimate_shelf_height.sh "$KEY_SAMPLE" --known-human-height-m 1.72
 ```
+
+## Clip Action Rule
+
+Clip filenames encode source and destination shelf positions:
+
+```text
+<session>_<camera>_<height1>_<height1_strength>_<height2>_<height2_strength>_<weight>_<ratio>_<take>_<action>.mp4
+```
+
+- `height1` / `height1_strength`: source position
+- `height2` / `height2_strength`: destination position
+- `*_lift.mp4`: process the first frame and label it with `height1`
+- `*_put.mp4`: process the last frame and label it with `height2`
 
 ## Stage Details
 
@@ -62,6 +75,8 @@ Behavior:
 - reads only the needed timestamp arrays from `/mnt/lift_data/Data/<session>.tar.gz`
 - builds cache only for the current camera
 - converts absolute timestamps into relative seconds
+- infers the clip action from the filename suffix
+- recommends `first` for `*_lift.mp4` and `last` for `*_put.mp4`
 - outputs `<clip>.mapping.json`
 
 Verified example output:
@@ -81,11 +96,11 @@ Entry points:
 
 Behavior:
 
-- extracts the final RGB frame from the clip video with `ffmpeg`
-- extracts the nearest final-frame depth frame from the tarball
+- extracts the recommended keyframe RGB frame from the clip video with `ffmpeg`
+- extracts the nearest keyframe depth frame from the tarball
 - extracts `depth.scale.npy`
 - extracts `depth.intrinsics.pkl`
-- saves RGB, raw depth, metric depth, depth visualization, and one final-frame sample manifest
+- saves RGB, raw depth, metric depth, depth visualization, and one keyframe sample manifest
 
 ### 3. Geometry sample preparation
 
@@ -217,7 +232,7 @@ Entry points:
 
 Behavior:
 
-- uses the final-frame sample folder, because the final frame corresponds to `height2`
+- uses the prepared keyframe sample folder: first frame for `lift`, last frame for `put`
 - uses the aligned human mesh feet as the floor reference when available
 - searches the shelf-side depth ROI for the target level (`high`, `mid`, or `low`)
 - computes height as `floor_y - target_y` because camera `Y` points down
