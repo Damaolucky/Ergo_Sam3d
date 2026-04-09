@@ -1,0 +1,34 @@
+{
+  "mapping_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4.mapping.json",
+  "clip_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19",
+  "source_clip_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4",
+  "sample_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19",
+  "sample_role": "first",
+  "position_label": "low_19",
+  "clip_video": "/mnt/lift_data/Annotation/Clips/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4",
+  "camera": "sagittal",
+  "tar_path": "/mnt/lift_data/Data/2024-05-03_15.tar.gz",
+  "source_video": "2024_05_03_15_sagittal.mp4",
+  "source_start": 138.739,
+  "source_end": 140.836,
+  "source_duration": 2.0970000000000084,
+  "clip_time_seconds": 0.0,
+  "color_frame": {
+    "index": 4146,
+    "timestamp_relative_seconds": 138.7330629825592
+  },
+  "nearest_depth_frame": {
+    "index": 2081,
+    "timestamp_relative_seconds": 138.71164560317993,
+    "tar_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/17147693657298308.depth.image.npy"
+  },
+  "depth_scale": 0.0010000000474974513,
+  "outputs": {
+    "rgb_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.rgb.png",
+    "depth_raw_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.depth_raw.npy",
+    "depth_meters_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.depth_meters.npy",
+    "depth_vis_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.depth_vis.png",
+    "intrinsics_pkl": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.intrinsics.pkl",
+    "sample_manifest_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.sample_manifest.json"
+  }
+}

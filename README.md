@@ -88,6 +88,7 @@ repo_root/
     mesh_recovery.md
   examples/
     example_commands.md
+    verified_results/
   scripts/
     bash/
       common.sh
@@ -315,6 +316,9 @@ Verified hand-anchored target-height example:
 - The current target-height stage measures the final hand height in the keyframe and uses it as a proxy for the source/destination shelf height. It is not yet an explicit cabinet-surface detector.
 
 See [docs/workflow.md](docs/workflow.md), [docs/data_layout.md](docs/data_layout.md), [docs/known_issues.md](docs/known_issues.md), and [docs/mesh_recovery.md](docs/mesh_recovery.md) for more detail.
+
+Curated production result snapshots are also stored under
+`examples/verified_results/` for lightweight GitHub review.
 
 ## Next Steps
 

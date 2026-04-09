@@ -1,0 +1,99 @@
+{
+  "status": "hand_anchored_target_height_estimated",
+  "clip_dir": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24",
+  "sample_role": "last",
+  "position_label": "high_24",
+  "target_level": "high",
+  "shelf_side": "right",
+  "method": "hand_final_height_local_depth_patch",
+  "floor_reference": {
+    "method": "aligned_mesh_feet_y_p99",
+    "source": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/aligned_mesh_vertices.npy",
+    "floor_y_m": 0.8815938830375671
+  },
+  "target_y_m": -0.23606282472610474,
+  "estimated_target_height_m": 1.1176567077636719,
+  "estimated_target_height_uncertainty_band_m": [
+    1.0949821472167969,
+    1.1357038831710815
+  ],
+  "estimated_hand_height_m": 1.1176567077636719,
+  "estimated_shelf_height_m": 1.1176567077636719,
+  "estimated_shelf_height_uncertainty_band_m": [
+    1.0949821472167969,
+    1.1357038831710815
+  ],
+  "estimated_human_height_m": 1.5728973758220675,
+  "target_to_human_height_ratio": 0.7105719196584799,
+  "shelf_to_human_height_ratio": 0.7105719196584799,
+  "known_human_height_m": null,
+  "known_human_height_calibrated_target_height_m": null,
+  "known_human_height_calibrated_shelf_height_m": null,
+  "hand_anchor": {
+    "method": "target_side_mask_extremity",
+    "side": "right",
+    "level": "high",
+    "search_rows_pixels": [
+      194,
+      455
+    ],
+    "anchor_uv_px": [
+      913,
+      300
+    ],
+    "target_side_edge_best_px": 913,
+    "target_side_edge_tolerance_px": 10,
+    "anchor_row_cluster_pixels": [
+      285,
+      316
+    ],
+    "human_bbox_xyxy": [
+      700,
+      116,
+      913,
+      638
+    ]
+  },
+  "hand_patch": {
+    "status": "ok",
+    "patch_xyxy": [
+      892,
+      285,
+      913,
+      315
+    ],
+    "row_half_span_px": 15,
+    "inward_span_px": 21,
+    "point_count": 273
+  },
+  "target_selection": {
+    "method": "local_hand_patch_median",
+    "point_count": 273,
+    "patch_quantiles_m": {
+      "5": 1.0819491147994995,
+      "25": 1.1024831533432007,
+      "50": 1.1176567077636719,
+      "75": 1.1298729181289673,
+      "95": 1.1788523197174072
+    }
+  },
+  "inputs": {
+    "rgb_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24.rgb.png",
+    "depth_meters_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24.depth_meters.npy",
+    "intrinsics_pkl": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24.intrinsics.pkl",
+    "human_mask_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/human_mask.npy"
+  },
+  "outputs": {
+    "shelf_height_preview_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/shelf_height_preview.png",
+    "shelf_height_report_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/shelf_height_report.png",
+    "shelf_height_summary_txt": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/shelf_height_summary.txt",
+    "shelf_height_estimate_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/shelf_height_estimate.json"
+  },
+  "notes": [
+    "Camera Y points down, so height is floor_y_m - target_y_m.",
+    "The estimate uses the prepared keyframe: first for lift clips and last for put clips.",
+    "The primary estimate is hand-anchored: it measures the final hand height in the selected keyframe, not a full cabinet surface reconstruction.",
+    "Because no color intrinsics / color-depth extrinsics are available, the RGB human mask is resized to depth resolution and remains approximate.",
+    "Inspect shelf_height_preview.png and shelf_height_report.png before treating the result as a final physical measurement."
+  ]
+}

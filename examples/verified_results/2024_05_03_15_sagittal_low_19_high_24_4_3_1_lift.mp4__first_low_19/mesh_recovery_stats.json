@@ -1,0 +1,30 @@
+{
+  "status": "success",
+  "clip_dir": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19",
+  "rgb_path": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.rgb.png",
+  "mask_path": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/human_mask.npy",
+  "bbox_xyxy": [
+    609.125,
+    285.625,
+    1012.875,
+    689.375
+  ],
+  "device": "cuda",
+  "hmr2_repo": "/home/hzhou397/hzhou/third_party/4D-Humans",
+  "hmr2_cache_dir": "/home/hzhou397/.cache/4DHumans",
+  "hmr2_checkpoint": "/home/hzhou397/.cache/4DHumans/logs/train/multiruns/hmr2/0/checkpoints/epoch=35-step=1000000.ckpt",
+  "num_vertices": 6890,
+  "num_joints": 44,
+  "outputs": {
+    "human_mesh_obj": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/human_mesh.obj",
+    "pred_vertices_3d_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/pred_vertices_3d.npy",
+    "pred_joints_3d_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/pred_joints_3d.npy",
+    "smpl_params_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/smpl_params.json",
+    "mesh_preview_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/mesh_preview.png",
+    "mesh_recovery_stats_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/mesh_recovery_stats.json"
+  },
+  "notes": [
+    "This stage uses the existing human mask to define the HMR2 crop.",
+    "pred_vertices_3d.npy and pred_joints_3d.npy are saved in camera-space coordinates."
+  ]
+}

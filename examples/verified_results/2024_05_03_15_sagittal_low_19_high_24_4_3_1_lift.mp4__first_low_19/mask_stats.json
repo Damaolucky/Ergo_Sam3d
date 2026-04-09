@@ -1,0 +1,26 @@
+{
+  "mask_shape": [
+    720,
+    1280
+  ],
+  "mask_num_pixels": 38614,
+  "mask_ratio": 0.04189887152777778,
+  "masked_valid_depth_pixels": 36796,
+  "human_point_count": 36796,
+  "human_depth_min_m": 1.8060001134872437,
+  "human_depth_max_m": 3.5510001182556152,
+  "human_depth_mean_m": 2.0567493438720703,
+  "human_depth_median_m": 1.9540001153945923,
+  "clip_dir": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19",
+  "rgb_path": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.rgb.png",
+  "depth_meters_path": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.depth_meters.npy",
+  "intrinsics_path": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.intrinsics.pkl",
+  "outputs": {
+    "human_mask_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/human_mask.png",
+    "human_mask_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/human_mask.npy",
+    "masked_depth_meters_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/masked_depth_meters.npy",
+    "human_pointcloud_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/human_pointcloud.npy",
+    "human_pointcloud_rgb_ply": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/human_pointcloud_rgb.ply",
+    "human_pointcloud_preview_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/human_pointcloud_preview.png"
+  }
+}

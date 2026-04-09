@@ -1,0 +1,111 @@
+{
+  "camera": "sagittal",
+  "tar_path": "/mnt/lift_data/Data/2024-05-03_15.tar.gz",
+  "cache_dir": "/home/hzhou397/hzhou/cache/2024-05-03_15",
+  "source_video": "2024_05_03_15_sagittal.mp4",
+  "source_start": 138.739,
+  "source_end": 140.836,
+  "source_duration": 2.0970000000000084,
+  "color_timestamp_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/color.timestamps.npy",
+  "depth_timestamp_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/depth.timestamps.npy",
+  "color_timestamp_cache": "/home/hzhou397/hzhou/cache/2024-05-03_15/sagittal.color.timestamps.npy",
+  "depth_timestamp_cache": "/home/hzhou397/hzhou/cache/2024-05-03_15/sagittal.depth.timestamps.npy",
+  "color_timestamp_unit_guess": "milliseconds->seconds",
+  "depth_timestamp_unit_guess": "milliseconds->seconds",
+  "color_timestamp_t0_seconds": 1714769226.9634304,
+  "depth_timestamp_t0_seconds": 1714769227.0112422,
+  "approx_color_fps": 29.987588297537677,
+  "approx_depth_fps": 15.002214043257899,
+  "color_frame_range": [
+    4146,
+    4209
+  ],
+  "first_color_frame": {
+    "index": 4146,
+    "timestamp_relative_seconds": 138.7330629825592
+  },
+  "last_color_frame": {
+    "index": 4209,
+    "timestamp_relative_seconds": 140.83322548866272
+  },
+  "mid_color_frame": {
+    "index": 4178,
+    "timestamp_relative_seconds": 139.7998170852661
+  },
+  "first_nearest_depth_frame": {
+    "index": 2081,
+    "timestamp_relative_seconds": 138.71164560317993,
+    "tar_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/17147693657298308.depth.image.npy"
+  },
+  "last_nearest_depth_frame": {
+    "index": 2113,
+    "timestamp_relative_seconds": 140.84394884109497,
+    "tar_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/17147693678633262.depth.image.npy"
+  },
+  "nearest_depth_frame": {
+    "index": 2097,
+    "timestamp_relative_seconds": 139.77780389785767,
+    "tar_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/17147693667965850.depth.image.npy"
+  },
+  "sample_frames": {
+    "first": {
+      "sample_role": "first",
+      "position_label": "low_19",
+      "sample_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19",
+      "clip_time_seconds": 0.0,
+      "color_frame": {
+        "index": 4146,
+        "timestamp_relative_seconds": 138.7330629825592
+      },
+      "nearest_depth_frame": {
+        "index": 2081,
+        "timestamp_relative_seconds": 138.71164560317993,
+        "tar_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/17147693657298308.depth.image.npy"
+      }
+    },
+    "last": {
+      "sample_role": "last",
+      "position_label": "high_24",
+      "sample_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__last_high_24",
+      "clip_time_seconds": 2.0970000000000084,
+      "color_frame": {
+        "index": 4209,
+        "timestamp_relative_seconds": 140.83322548866272
+      },
+      "nearest_depth_frame": {
+        "index": 2113,
+        "timestamp_relative_seconds": 140.84394884109497,
+        "tar_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/17147693678633262.depth.image.npy"
+      }
+    }
+  },
+  "clip_action": "lift",
+  "recommended_sample_role": "first",
+  "recommended_sample_reason": "lift clips start at the source shelf/object position",
+  "recommended_sample_frame": {
+    "sample_role": "first",
+    "position_label": "low_19",
+    "sample_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19",
+    "clip_time_seconds": 0.0,
+    "color_frame": {
+      "index": 4146,
+      "timestamp_relative_seconds": 138.7330629825592
+    },
+    "nearest_depth_frame": {
+      "index": 2081,
+      "timestamp_relative_seconds": 138.71164560317993,
+      "tar_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/17147693657298308.depth.image.npy"
+    }
+  },
+  "metadata_fields": {
+    "height1": "low",
+    "height1_strength": "19",
+    "height2": "high",
+    "height2_strength": "24",
+    "weight": "4",
+    "ratio": "3",
+    "take": 1
+  },
+  "clip_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4",
+  "json_path": "/mnt/lift_data/Annotation/Annotation_json/2024_05_03_15.json"
+}

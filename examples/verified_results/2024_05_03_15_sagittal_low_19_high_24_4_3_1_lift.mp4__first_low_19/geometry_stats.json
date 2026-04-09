@@ -1,0 +1,57 @@
+{
+  "clip_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19",
+  "source_clip_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4",
+  "sample_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19",
+  "sample_role": "first",
+  "position_label": "low_19",
+  "clip_time_seconds": 0.0,
+  "camera": "sagittal",
+  "source_video": "2024_05_03_15_sagittal.mp4",
+  "source_start": 138.739,
+  "source_end": 140.836,
+  "source_duration": 2.0970000000000084,
+  "depth_stats": {
+    "shape": [
+      720,
+      1280
+    ],
+    "num_pixels": 921600,
+    "num_valid_pixels": 804005,
+    "valid_ratio": 0.8724012586805555,
+    "depth_min_m": 0.8390000462532043,
+    "depth_max_m": 65.53500366210938,
+    "depth_mean_m": 3.0394060611724854,
+    "depth_median_m": 2.742000102996826
+  },
+  "depth_filter": {
+    "valid_points_before_filter": 804005,
+    "pointcloud_points_after_filter": 802406,
+    "max_depth_percentile": 99.8,
+    "max_depth_m": 5.350000381469727
+  },
+  "pointcloud_stats": {
+    "num_points": 802406,
+    "bbox_min": [
+      -3.6308629512786865,
+      -2.9175522327423096,
+      0.8390000462532043
+    ],
+    "bbox_max": [
+      2.614109992980957,
+      2.736520528793335,
+      5.350000381469727
+    ]
+  },
+  "files": {
+    "mapping_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4.mapping.json",
+    "sample_manifest_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.sample_manifest.json",
+    "rgb_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.rgb.png",
+    "depth_raw_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.depth_raw.npy",
+    "depth_meters_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.depth_meters.npy",
+    "depth_vis_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.depth_vis.png",
+    "intrinsics_pkl": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19.intrinsics.pkl",
+    "pointcloud_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/pointcloud.npy",
+    "pointcloud_rgb_ply": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/pointcloud_rgb.ply",
+    "pointcloud_preview_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19/pointcloud_preview.png"
+  }
+}

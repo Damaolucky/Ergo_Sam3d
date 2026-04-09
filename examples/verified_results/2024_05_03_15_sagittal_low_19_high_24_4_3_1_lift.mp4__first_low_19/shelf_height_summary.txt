@@ -1,0 +1,12 @@
+Hand-anchored target height estimate
+clip_dir: /home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_lift.mp4__first_low_19
+position_label: low_19
+target_level: low
+shelf_side: right
+estimated_target_height_m: 0.3602
+estimated_target_height_uncertainty_band_m: [0.3422, 0.3805]
+estimated_human_height_m: 0.9277444323897361
+target_to_human_height_ratio: 0.38828018885834276
+known_human_height_calibrated_target_height_m: None
+method: hand_final_height_local_depth_patch
+view: shelf_height_report.png and shelf_height_preview.png

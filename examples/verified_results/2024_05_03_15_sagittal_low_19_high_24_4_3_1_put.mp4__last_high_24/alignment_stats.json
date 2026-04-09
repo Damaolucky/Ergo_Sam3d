@@ -1,0 +1,244 @@
+{
+  "status": "height_prior_alignment_complete",
+  "clip_dir": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24",
+  "inputs": {
+    "human_mesh_obj": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/human_mesh.obj",
+    "human_pointcloud_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/human_pointcloud.npy"
+  },
+  "transform": {
+    "alignment_method": "height_prior_yaw_only",
+    "yaw_radians": 0.6836699003403308,
+    "yaw_degrees": 39.17139986963056,
+    "rotation_matrix": [
+      [
+        0.7752598524093628,
+        0.0,
+        0.6316424012184143
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        -0.6316424012184143,
+        0.0,
+        0.7752598524093628
+      ]
+    ],
+    "translation": [
+      -50.33563232421875,
+      0.09436237812042236,
+      -59.683441162109375
+    ],
+    "bottom_anchor_percentile": 95.0,
+    "pointcloud_subset_count": 29559,
+    "pointcloud_torso_count": 17724,
+    "mesh_torso_count": 3242,
+    "pointcloud_torso_median": [
+      0.41336318850517273,
+      -0.1138298511505127,
+      1.9850001335144043
+    ],
+    "mesh_torso_median_before_translation": [
+      50.74899673461914,
+      -0.21107158064842224,
+      61.66844177246094
+    ],
+    "height_reference": {
+      "mode": "mesh_native_height_prior",
+      "mesh_native_height_m": 1.5812559533119201,
+      "target_human_height_m": null,
+      "applied_scale": 1.0,
+      "aligned_mesh_height_m": 1.5728973758220675,
+      "observed_pointcloud_height_raw_m": 1.5243370294570924,
+      "observed_pointcloud_height_subset_m": 1.4975679159164428,
+      "pointcloud_bottom_y_m": 0.8158366084098816,
+      "aligned_mesh_bottom_y_m": 0.8158366084098816,
+      "refined_scale_multiplier": 0.9947138714702781
+    },
+    "initial_alignment_subset": {
+      "bbox_padding_xyz_m": [
+        0.11999999731779099,
+        0.11999999731779099,
+        0.11999999731779099
+      ],
+      "bbox_subset_count": 30428,
+      "distance_threshold_m": 0.2,
+      "distance_pruned_count": 29414,
+      "method": "mesh_bbox_plus_distance_prune",
+      "distance_pruned_metrics": {
+        "mean_distance_m": 0.051234233564612666,
+        "median_distance_m": 0.04136430339244734,
+        "p95_distance_m": 0.12798661401457856
+      }
+    },
+    "refinement": {
+      "status": "completed",
+      "accepted": true,
+      "initial_metrics": {
+        "mesh_to_subset": {
+          "mean_distance_m": 0.15505079811098593,
+          "median_distance_m": 0.11620053413771089,
+          "p95_distance_m": 0.48318409714609256
+        },
+        "subset_to_mesh": {
+          "mean_distance_m": 0.05126251154460167,
+          "median_distance_m": 0.04155365512833198,
+          "p95_distance_m": 0.1279779746077744
+        }
+      },
+      "final_metrics": {
+        "mesh_to_subset": {
+          "mean_distance_m": 0.12828336426432654,
+          "median_distance_m": 0.09186341455516772,
+          "p95_distance_m": 0.3954982199763675
+        },
+        "subset_to_mesh": {
+          "mean_distance_m": 0.04504561159453882,
+          "median_distance_m": 0.033206136599435686,
+          "p95_distance_m": 0.13024927081520926
+        }
+      },
+      "stages": [
+        {
+          "name": "coarse",
+          "accepted": true,
+          "initial_score": 0.16976814978178217,
+          "final_score": 0.15117629915492045,
+          "optimized_delta": {
+            "yaw_degrees": -26.71680318860388,
+            "translation": [
+              -0.011803707277430705,
+              -0.08183876813544462,
+              0.075139232261135
+            ],
+            "scale_multiplier": 0.9921311143321538
+          },
+          "thresholds": {
+            "mesh_to_scan_m": 0.35,
+            "scan_to_mesh_m": 0.3,
+            "scan_weight": 0.55
+          }
+        },
+        {
+          "name": "medium",
+          "accepted": false,
+          "initial_score": 0.1437404122427875,
+          "final_score": 0.1436632388886066,
+          "optimized_delta": {
+            "yaw_degrees": -1.9344702170246895,
+            "translation": [
+              8.139902990658159e-05,
+              6.150214378654968e-05,
+              -0.00023951185582639836
+            ],
+            "scale_multiplier": 1.00084988010509
+          },
+          "thresholds": {
+            "mesh_to_scan_m": 0.25,
+            "scan_to_mesh_m": 0.2,
+            "scan_weight": 0.7
+          }
+        },
+        {
+          "name": "fine",
+          "accepted": true,
+          "initial_score": 0.13312382877242745,
+          "final_score": 0.13174128260116388,
+          "optimized_delta": {
+            "yaw_degrees": -6.543333079794396,
+            "translation": [
+              0.0007679586766794187,
+              0.02531938797606724,
+              0.008798128963931066
+            ],
+            "scale_multiplier": 1.0026032417498194
+          },
+          "thresholds": {
+            "mesh_to_scan_m": 0.16,
+            "scan_to_mesh_m": 0.14,
+            "scan_weight": 0.85
+          }
+        }
+      ],
+      "optimized_delta": {
+        "yaw_degrees": -33.26013626839828,
+        "translation": [
+          -0.011035748600751287,
+          -0.05651938015937738,
+          0.08393736122506607
+        ],
+        "scale_multiplier": 0.9947138714702781
+      }
+    },
+    "final_alignment_subset": {
+      "bbox_padding_xyz_m": [
+        0.11999999731779099,
+        0.11999999731779099,
+        0.11999999731779099
+      ],
+      "bbox_subset_count": 31858,
+      "distance_threshold_m": 0.2,
+      "distance_pruned_count": 30330,
+      "method": "mesh_bbox_plus_distance_prune",
+      "distance_pruned_metrics": {
+        "mean_distance_m": 0.04720317934981803,
+        "median_distance_m": 0.03457853555042536,
+        "p95_distance_m": 0.13588927173127627
+      }
+    },
+    "overlap_metrics": {
+      "mesh_to_alignment_subset": {
+        "mean_distance_m": 0.1266671645735946,
+        "median_distance_m": 0.08959413980474285,
+        "p95_distance_m": 0.39460788978426176
+      },
+      "alignment_subset_to_mesh": {
+        "mean_distance_m": 0.04720317934981803,
+        "median_distance_m": 0.03457853555042536,
+        "p95_distance_m": 0.13588927173127627
+      }
+    }
+  },
+  "estimated_human_height_m": 1.5728973758220675,
+  "mesh_extent_before": [
+    0.7081706523895264,
+    1.677024483680725,
+    0.9258041381835938
+  ],
+  "mesh_extent_after": [
+    0.6689028143882751,
+    1.6681594848632812,
+    0.9275016784667969
+  ],
+  "pointcloud_extent": [
+    1.3725824356079102,
+    2.0744028091430664,
+    3.5320003032684326
+  ],
+  "pointcloud_subset_extent": [
+    0.355283260345459,
+    1.6745909452438354,
+    0.8680000305175781
+  ],
+  "outputs": {
+    "aligned_mesh_obj": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/aligned_mesh.obj",
+    "aligned_mesh_vertices_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/aligned_mesh_vertices.npy",
+    "alignment_pointcloud_subset_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/alignment_pointcloud_subset.npy",
+    "alignment_pointcloud_subset_preview_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/alignment_pointcloud_subset_preview.png",
+    "mesh_pointcloud_overlay_preview_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/mesh_pointcloud_overlay_preview.png",
+    "alignment_stats_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24/alignment_stats.json"
+  },
+  "notes": [
+    "This alignment preserves the camera vertical axis and solves only for yaw, translation, and optional height-based scale.",
+    "By default the mesh keeps its native human-height prior; pass --target-human-height-m when the subject's height is known.",
+    "The saved alignment point-cloud subset is a mesh-guided visible body-surface scan, not a full human silhouette.",
+    "Use the front overlay panel to inspect human shape; the top view can look like a thin orange band for side-view depth."
+  ],
+  "todo": [
+    "Estimate cabinet geometry in the same depth frame and compare its top height against the aligned human height reference.",
+    "Promote the current alignment subset heuristic into an explicit body-only point-cloud cleaning stage shared across the pipeline.",
+    "Add quantitative overlap metrics once cabinet and floor landmarks are available."
+  ]
+}

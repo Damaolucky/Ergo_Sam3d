@@ -1,0 +1,34 @@
+{
+  "mapping_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4.mapping.json",
+  "clip_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24",
+  "source_clip_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4",
+  "sample_name": "2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24",
+  "sample_role": "last",
+  "position_label": "high_24",
+  "clip_video": "/mnt/lift_data/Annotation/Clips/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4",
+  "camera": "sagittal",
+  "tar_path": "/mnt/lift_data/Data/2024-05-03_15.tar.gz",
+  "source_video": "2024_05_03_15_sagittal.mp4",
+  "source_start": 140.836,
+  "source_end": 144.32100000000003,
+  "source_duration": 3.4849999999999994,
+  "clip_time_seconds": 3.4849999999999994,
+  "color_frame": {
+    "index": 4314,
+    "timestamp_relative_seconds": 144.3359351158142
+  },
+  "nearest_depth_frame": {
+    "index": 2165,
+    "timestamp_relative_seconds": 144.31139516830444,
+    "tar_member": "Users/zzhu362/Documents/DynamicLiftsExperiment/Data/recording/2024-05-03_15/sagittal/17147693713327134.depth.image.npy"
+  },
+  "depth_scale": 0.0010000000474974513,
+  "outputs": {
+    "rgb_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24.rgb.png",
+    "depth_raw_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24.depth_raw.npy",
+    "depth_meters_npy": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24.depth_meters.npy",
+    "depth_vis_png": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24.depth_vis.png",
+    "intrinsics_pkl": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24.intrinsics.pkl",
+    "sample_manifest_json": "/home/hzhou397/hzhou/outputs/2024_05_03_15_sagittal_low_19_high_24_4_3_1_put.mp4__last_high_24.sample_manifest.json"
+  }
+}
