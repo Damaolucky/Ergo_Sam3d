@@ -19,6 +19,7 @@ outputs/
 .pytest_cache/
 .mypy_cache/
 .ipynb_checkpoints/
+artifacts/
 
 # Models and external dependencies
 yolov8n-seg.pt

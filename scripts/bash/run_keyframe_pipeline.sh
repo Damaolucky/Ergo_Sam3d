@@ -28,6 +28,7 @@ Optional environment variables:
   ERGO_KNOWN_HUMAN_HEIGHT_M   If set, passed to run_estimate_shelf_height.sh.
   ERGO_SHELF_SIDE             Optional shelf side: left, right, or auto.
   ERGO_LEVEL                  Optional target level override: high, mid, or low.
+  ERGO_CALIBRATION_JSON       Optional camera calibration JSON for geometric mask reprojection.
 EOF
 }
 
